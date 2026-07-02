@@ -53,6 +53,16 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
+	// 高级调度器字段。AutoDisabledUntil 为调度器临时禁用的到期时间戳（秒），
+	// 0 表示不处于调度器临时禁用状态（旧式 auto disabled 渠道保持 0，不会被自动恢复）。
+	// 渠道级调度配置全部使用指针：nil 表示继承全局默认，避免把 0 同时当作"关闭"和"未设置"。
+	AutoDisabledUntil             int64 `json:"auto_disabled_until" gorm:"bigint;default:0;index"`
+	SchedulerEnabled              *bool `json:"scheduler_enabled"`
+	SchedulerRetryTimes           *int  `json:"scheduler_retry_times"`
+	SchedulerAutoDisableSeconds   *int  `json:"scheduler_auto_disable_seconds"`
+	SchedulerAutoRecoverEnabled   *bool `json:"scheduler_auto_recover_enabled"`
+	SchedulerManualRestoreAllowed *bool `json:"scheduler_manual_restore_allowed"`
+
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
 	// cache info
@@ -340,6 +350,46 @@ func (channel *Channel) GetAutoBan() bool {
 		return false
 	}
 	return *channel.AutoBan == 1
+}
+
+// GetSchedulerEnabled 该渠道是否参与高级调度，nil 表示继承默认（参与）。
+func (channel *Channel) GetSchedulerEnabled() bool {
+	if channel.SchedulerEnabled == nil {
+		return true
+	}
+	return *channel.SchedulerEnabled
+}
+
+// GetSchedulerAutoRecoverEnabled 临时禁用到期后是否允许自动恢复，nil 表示允许。
+func (channel *Channel) GetSchedulerAutoRecoverEnabled() bool {
+	if channel.SchedulerAutoRecoverEnabled == nil {
+		return true
+	}
+	return *channel.SchedulerAutoRecoverEnabled
+}
+
+// GetSchedulerManualRestoreAllowed 是否允许管理员手动恢复，nil 表示允许。
+func (channel *Channel) GetSchedulerManualRestoreAllowed() bool {
+	if channel.SchedulerManualRestoreAllowed == nil {
+		return true
+	}
+	return *channel.SchedulerManualRestoreAllowed
+}
+
+// ResolveSchedulerRetryTimes 渠道级连续失败阈值；nil 或非法值回退到全局默认。
+func (channel *Channel) ResolveSchedulerRetryTimes(globalDefault int) int {
+	if channel.SchedulerRetryTimes == nil || *channel.SchedulerRetryTimes <= 0 {
+		return globalDefault
+	}
+	return *channel.SchedulerRetryTimes
+}
+
+// ResolveSchedulerAutoDisableSeconds 渠道级临时禁用时长；nil 或非法值回退到全局默认。
+func (channel *Channel) ResolveSchedulerAutoDisableSeconds(globalDefault int) int {
+	if channel.SchedulerAutoDisableSeconds == nil || *channel.SchedulerAutoDisableSeconds <= 0 {
+		return globalDefault
+	}
+	return *channel.SchedulerAutoDisableSeconds
 }
 
 func (channel *Channel) Save() error {

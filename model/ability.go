@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -190,6 +191,54 @@ func filterAbilitiesByRequestPath(abilities []Ability, requestPath string) []Abi
 		}
 	}
 	return filtered
+}
+
+// getSatisfiedChannelsFromDB 非内存缓存模式下，从 abilities 表返回满足
+// group+model+requestPath 的全部启用渠道（调度器候选集）。
+// 与缓存路径保持一致：找不到精确模型时回退到归一化模型名。
+func getSatisfiedChannelsFromDB(group string, model string, requestPath string) ([]*Channel, error) {
+	abilities, err := listSatisfiedAbilities(group, model, requestPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(abilities) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(model)
+		if normalizedModel != model {
+			abilities, err = listSatisfiedAbilities(group, normalizedModel, requestPath)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(abilities) == 0 {
+		return nil, nil
+	}
+	channelIds := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := seen[ability.ChannelId]; ok {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIds = append(channelIds, ability.ChannelId)
+	}
+	// 选中渠道后 SetupContextForSelectedChannel 需要 key 等完整字段，此处取全量列。
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	return channels, nil
+}
+
+func listSatisfiedAbilities(group string, model string, requestPath string) ([]Ability, error) {
+	var abilities []Ability
+	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
+		Order("priority DESC").
+		Find(&abilities).Error
+	if err != nil {
+		return nil, err
+	}
+	return filterAbilitiesByRequestPath(abilities, requestPath), nil
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
