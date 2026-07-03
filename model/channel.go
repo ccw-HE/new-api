@@ -618,6 +618,13 @@ func (channel *Channel) Update() error {
 		return err
 	}
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
+	// 管理员编辑走 GORM 非零值更新，重新启用渠道时不会写零值字段，
+	// 这里显式清除调度器临时禁用标记，避免恢复任务误恢复旧式禁用渠道。
+	if channel.Status == common.ChannelStatusEnabled && channel.AutoDisabledUntil != 0 {
+		if clearErr := SetChannelAutoDisabledUntil(channel.Id, 0); clearErr == nil {
+			channel.AutoDisabledUntil = 0
+		}
+	}
 	err = channel.UpdateAbilities(nil)
 	return err
 }
@@ -819,17 +826,25 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			channel.Status = status
 			shouldUpdateAbilities = true
 		}
+		// 任何状态流转都清除调度器临时禁用标记，保证 auto_disabled_until>0
+		// 恒等于"调度器临时禁用中"。调度器临时禁用会在本函数之后
+		// 通过 SetChannelAutoDisabledUntil 重新写入新的到期时间。
+		channel.AutoDisabledUntil = 0
 		err = channel.SaveWithoutKey()
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
 			return false
 		}
+		CacheSetChannelAutoDisabledUntil(channelId, 0)
 	}
 	return true
 }
 
 func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
+	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(map[string]interface{}{
+		"status":              common.ChannelStatusEnabled,
+		"auto_disabled_until": 0,
+	}).Error
 	if err != nil {
 		return err
 	}

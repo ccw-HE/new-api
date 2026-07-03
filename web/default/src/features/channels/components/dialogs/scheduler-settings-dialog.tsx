@@ -332,6 +332,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [config, setConfig] = useState<SchedulerGlobalConfig | null>(null)
+  const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
 
   const { data, isLoading } = useQuery({
     queryKey: schedulerQueryKeys.globalConfig(),
@@ -342,6 +343,11 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
   useEffect(() => {
     if (data?.success && data.data) {
       setConfig(data.data)
+      setNumberDrafts({
+        channel_failure_threshold: String(data.data.channel_failure_threshold),
+        auto_disable_seconds: String(data.data.auto_disable_seconds),
+        max_attempts_per_request: String(data.data.max_attempts_per_request),
+      })
     }
   }, [data])
 
@@ -356,6 +362,28 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
       }
     },
   })
+
+  const handleSave = () => {
+    if (!config) return
+    const parsed: Record<string, number> = {}
+    for (const field of NUMBER_FIELDS) {
+      const raw = (numberDrafts[field.key] ?? '').trim()
+      const value = Number(raw)
+      if (raw === '' || Number.isNaN(value) || value < field.min || value > field.max) {
+        toast.error(
+          `${t(field.label)}: ${t('must be a number between')} ${field.min} - ${field.max}`
+        )
+        return
+      }
+      parsed[field.key] = value
+    }
+    saveMutation.mutate({
+      ...config,
+      channel_failure_threshold: parsed.channel_failure_threshold,
+      auto_disable_seconds: parsed.auto_disable_seconds,
+      max_attempts_per_request: parsed.max_attempts_per_request,
+    })
+  }
 
   if (isLoading || !config) {
     return (
@@ -400,18 +428,13 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
               type='number'
               min={field.min}
               max={field.max}
-              value={config[field.key]}
-              onChange={(e) => {
-                const value = Number(e.target.value)
-                setConfig((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        [field.key]: Number.isNaN(value) ? 0 : value,
-                      }
-                    : prev
-                )
-              }}
+              value={numberDrafts[field.key] ?? ''}
+              onChange={(e) =>
+                setNumberDrafts((prev) => ({
+                  ...prev,
+                  [field.key]: e.target.value,
+                }))
+              }
             />
             <p className='text-muted-foreground text-xs'>
               {t(field.description)}
@@ -420,10 +443,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
         ))}
       </div>
       <div className='flex justify-end'>
-        <Button
-          onClick={() => config && saveMutation.mutate(config)}
-          disabled={saveMutation.isPending}
-        >
+        <Button onClick={handleSave} disabled={saveMutation.isPending}>
           {saveMutation.isPending && (
             <Loader2 className='mr-2 size-4 animate-spin' />
           )}

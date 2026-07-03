@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -344,6 +345,10 @@ func TempDisableChannelForScheduler(channel *model.Channel, apiErr *types.NewAPI
 		return disabledUntil, true
 	}
 	common.SysLog(fmt.Sprintf("channel scheduler temporarily disabled channel「%s」(#%d) for %d seconds, until %d", channel.Name, channel.Id, seconds, disabledUntil))
+	subject := fmt.Sprintf("渠道「%s」（#%d）已被调度器临时禁用", channel.Name, channel.Id)
+	content := fmt.Sprintf("渠道「%s」（#%d）连续失败达到阈值，已被调度器临时禁用 %d 秒，预计 %s 恢复。原因：%s",
+		channel.Name, channel.Id, seconds, time.Unix(disabledUntil, 0).Format("2006-01-02 15:04:05"), reason)
+	NotifyRootUser(formatNotifyType(channel.Id, common.ChannelStatusAutoDisabled), subject, content)
 	return disabledUntil, true
 }
 

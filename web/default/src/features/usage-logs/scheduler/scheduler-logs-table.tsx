@@ -33,6 +33,7 @@ import {
 import { Dialog } from '@/components/dialog'
 import { StatusBadge } from '@/components/status-badge'
 import { getSchedulerLogs, schedulerQueryKeys } from './api'
+import { getDefaultTimeRange } from '../lib/utils'
 import {
   getSchedulerEventConfig,
   useSchedulerLogsColumns,
@@ -89,12 +90,12 @@ export function SchedulerLogsTable() {
       const priority = Number(searchParams.priority)
       if (!Number.isNaN(priority)) params.priority = priority
     }
-    if (searchParams.startTime) {
-      params.start_timestamp = Math.floor(searchParams.startTime / 1000)
-    }
-    if (searchParams.endTime) {
-      params.end_timestamp = Math.floor(searchParams.endTime / 1000)
-    }
+    // URL 无时间参数时应用与筛选栏展示一致的默认时间范围
+    const defaultRange = getDefaultTimeRange()
+    const startTime = searchParams.startTime ?? defaultRange.start.getTime()
+    const endTime = searchParams.endTime ?? defaultRange.end.getTime()
+    params.start_timestamp = Math.floor(startTime / 1000)
+    params.end_timestamp = Math.floor(endTime / 1000)
     return params
   }, [pagination.pageIndex, pagination.pageSize, searchParams])
 

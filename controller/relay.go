@@ -188,8 +188,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
+	useScheduler := false
+	var schedulerSession *service.ChannelSchedulerSession
 	if service.ShouldUseChannelScheduler(c, relayInfo.IsStream) {
-		newAPIError = relayWithChannelScheduler(c, relayInfo, relayFormat)
+		session, sessionErr := service.NewChannelSchedulerSession(c, relayInfo.TokenGroup, relayInfo.OriginModelName, c.Request.URL.Path)
+		if sessionErr != nil {
+			// 候选加载失败时降级走旧调度逻辑，不影响本次请求
+			logger.LogError(c, fmt.Sprintf("channel scheduler: load candidates failed, fallback to legacy retry: %s", sessionErr.Error()))
+		} else {
+			schedulerSession = session
+			useScheduler = true
+		}
+	}
+
+	if useScheduler {
+		newAPIError = relayWithChannelScheduler(c, relayInfo, relayFormat, schedulerSession)
 	} else {
 		for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 			relayInfo.RetryIndex = retryParam.GetRetry()
@@ -283,12 +296,7 @@ func dispatchRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat
 // 同渠道连续重试到阈值 -> 临时禁用并移出候选 -> 同优先级换渠道 -> 同级耗尽后降级。
 // 首个渠道沿用 middleware.Distribute 的选择结果并纳入会话计数；
 // 阈值临时禁用由会话统一执行，不走旧的"失败立即禁用"路径。
-func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat) *types.NewAPIError {
-	session, err := service.NewChannelSchedulerSession(c, relayInfo.TokenGroup, relayInfo.OriginModelName, c.Request.URL.Path)
-	if err != nil {
-		return types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的候选渠道失败: %s", relayInfo.TokenGroup, relayInfo.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-
+func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat, session *service.ChannelSchedulerSession) *types.NewAPIError {
 	var newAPIError *types.NewAPIError
 	for attempt := 0; ; attempt++ {
 		var channel *model.Channel
@@ -447,10 +455,17 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 }
 
 // processChannelErrorForScheduler 高级调度器接管时的失败处理：
-// 只做日志记录，禁用动作由调度会话在达到阈值后统一执行（临时禁用），
-// 不走旧的"符合禁用条件立即禁用"路径，否则会破坏"连续失败 N 次再禁用"语义。
+// 渠道级禁用由调度会话在达到阈值后统一执行（临时禁用），不走旧的
+// "符合禁用条件立即禁用"路径，否则会破坏"连续失败 N 次再禁用"语义。
+// 多 Key 渠道保留旧的 Key 级禁用能力：只禁用出错的 Key，渠道继续用
+// 其余 Key 服务；全部 Key 禁用后渠道进入旧式 auto disabled（无到期时间）。
 func processChannelErrorForScheduler(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	if channelError.UsingKey != "" && channelError.IsMultiKey && channelError.AutoBan && service.ShouldDisableChannel(err) {
+		gopool.Go(func() {
+			service.DisableChannel(channelError, err.ErrorWithStatusCode())
+		})
+	}
 	recordRelayErrorLog(c, err)
 }
 

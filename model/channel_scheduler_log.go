@@ -25,7 +25,7 @@ const (
 // 第一版落在主库 DB（与渠道表同库，便于关联），不放 LOG_DB，
 // 避免 ClickHouse 建表 / TTL / 查询适配成本（见二次开发计划第 10 节）。
 type ChannelSchedulerLog struct {
-	Id                     int    `json:"id"`
+	Id                     int    `json:"id" gorm:"index:idx_csl_created_at_id,priority:2;index:idx_csl_channel_id_id,priority:2"`
 	CreatedAt              int64  `json:"created_at" gorm:"bigint;index:idx_csl_created_at_id,priority:1"`
 	EventType              string `json:"event_type" gorm:"type:varchar(32);index;default:''"`
 	RequestId              string `json:"request_id" gorm:"type:varchar(64);index;default:''"`
