@@ -96,7 +96,8 @@ func GetChannelSchedulerLogs(params SchedulerLogQueryParams) ([]*ChannelSchedule
 		tx = tx.Where("model_name = ?", params.ModelName)
 	}
 	if params.Group != "" {
-		tx = tx.Where(commonGroupCol+" = ?", params.Group)
+		// map 条件由 GORM 按方言对保留字列名（group）自动加引号
+		tx = tx.Where(map[string]interface{}{"group": params.Group})
 	}
 	if params.Priority != nil {
 		tx = tx.Where("priority = ?", *params.Priority)

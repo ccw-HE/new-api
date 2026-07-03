@@ -232,9 +232,13 @@ func getSatisfiedChannelsFromDB(group string, model string, requestPath string) 
 
 func listSatisfiedAbilities(group string, model string, requestPath string) ([]Ability, error) {
 	var abilities []Ability
-	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").
-		Find(&abilities).Error
+	// map 条件由 GORM 按方言对保留字列名（group）自动加引号，
+	// 不依赖 initCol 的初始化时序，SQLite/MySQL/PostgreSQL 通用。
+	err := DB.Where(map[string]interface{}{
+		"group":   group,
+		"model":   model,
+		"enabled": true,
+	}).Order("priority DESC").Find(&abilities).Error
 	if err != nil {
 		return nil, err
 	}
