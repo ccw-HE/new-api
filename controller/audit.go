@@ -45,6 +45,11 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply":     "Applied upstream model changes to channel (ID: ${id})",
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
+	"channel.scheduler_config":  "Updated scheduler config of channel ${name} (ID: ${id})",
+	"channel.scheduler_restore": "Manually restored scheduler-disabled channel (ID: ${id})",
+	"scheduler.config_update":   "Updated channel scheduler global config (enabled: ${enabled}, observation_only: ${observation_only})",
+	"scheduler.logs_cleanup":    "Cleaned up ${count} channel scheduler logs",
+
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
 }
 
