@@ -21,7 +21,7 @@
 - [x] T11 前端 default：调度日志独立页（/usage-logs/scheduler，侧边栏"使用日志"下新增入口，复用现有表格/筛选）
 - [x] T12 前端 default：渠道页调度器面板（全局设置入口 + 临时禁用面板 + 行操作：调度设置/手动恢复/查看调度日志）+ i18n 六语言
 - [x] T13 前端验证：default typecheck+build 通过；classic build 通过（classic 本期仅保证构建不坏）
-- [x] T14 验收：本地端到端验收 27/27 全部通过（mock 上游 + SQLite + 内存缓存：A×3→禁用7200s→B×3→禁用→C 成功；渠道级阈值/时长覆盖精确生效；手动恢复；恢复 API 拒绝手动禁用渠道；调度日志/统计/临时禁用列表正确）。Docker Desktop 引擎未能启动，compose 冒烟未执行（可用 一键启动.bat build 自行验证）
+- [x] T14 验收：本地端到端验收 27/27 全部通过（mock 上游 + SQLite + 内存缓存：A×3→禁用7200s→B×3→禁用→C 成功；渠道级阈值/时长覆盖精确生效；手动恢复；恢复 API 拒绝手动禁用渠道；调度日志/统计/临时禁用列表正确）。dev compose 已完成 rebuild/API 冒烟：`new-api-dev:local` 镜像源码戳为 `42ce882ec7b53321`，`/api/channel_scheduler/logs`、`/logs/stat`、`/disabled`、`/config`、`/channel/1/config`、`/restore/1` 均返回鉴权响应而非 404，覆盖截图 1/2 的调度器接口 404 问题。
 - [x] T15 多视角对抗审查完成（15 代理）：确认 8 项问题已全部修复（i18n 命名空间、auto_disabled_until 残留、多 Key 渠道 key 级禁用保留、会话失败降级、索引定义、默认时间范围、数字输入、禁用通知）；复审新增 2 项恢复语义问题（未到期手动恢复、不可自动恢复渠道唤醒恢复任务）已修复并补测试。
 
 ## 关键设计决定（依据计划书）
@@ -57,3 +57,4 @@ cd web/classic && bun run build
 - 2026-07-03: 前端格式检查补充：npm run format:check --workspace default 失败于大量既有格式差异；本阶段只对改动的 3 个 TSX 文件执行 oxfmt，并恢复版权头到文件顶部，随后 typecheck/build 复验通过。
 - 2026-07-03: 处理阶段复审 3 项 Important：一键启动后端源码戳从 HEAD-dirty 改为后端相关文件内容哈希，避免 dirty 状态下继续修改仍复用旧镜像；恢复任务 handler 取消全局开关空跑短路，只在存在已到期且允许自动恢复渠道时启用；一键启动 stop 默认只停本项目服务，不再关闭整个 Docker Desktop，新增 stop-all 才执行全局关闭。
 - 2026-07-03: 复审修复验证：新增 TestSchedulerRecoverHandlerEnabledRequiresRecoverableChannel 先红后绿；一键启动.bat probe 输出内容哈希 Source stamp 并判定旧镜像需 rebuild；Docker Go 环境 go test ./service ./model ./controller ./setting/operation_setting 通过，go build ./... 通过；web/default typecheck/build 通过，web/classic build 通过；git diff --check 通过。
+- 2026-07-04: 补做 dev compose 冒烟：`一键启动.bat probe` 输出 Source stamp `42ce882ec7b53321` 且判定需 rebuild；执行 `docker compose -f docker-compose.dev.yml up -d --build new-api` 后后端容器启动完成；六个前端调度器 API 路径均返回 401 Unauthorized 而不是 404，说明开发后端已加载新路由。观察到 Docker build context 约 3.36GB，后续可单独优化 `.dockerignore`，本阶段不扩大改动面。
