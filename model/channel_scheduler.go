@@ -145,13 +145,19 @@ func GetSchedulerTempDisabledChannels() ([]*Channel, error) {
 	return channels, err
 }
 
-// HasSchedulerTempDisabledChannels 是否存在调度器临时禁用的渠道。
+// HasSchedulerTempDisabledChannels 是否存在可由恢复任务处理的调度器临时禁用渠道。
 // 供自动恢复任务的 Enabled 判定使用：即使调度器总开关已关闭，
-// 存量临时禁用渠道也必须能够到期恢复。
+// 存量临时禁用渠道也必须能够到期恢复；未到期或关闭自动恢复的渠道不唤醒任务。
 func HasSchedulerTempDisabledChannels() bool {
 	var count int64
+	now := common.GetTimestamp()
 	err := DB.Model(&Channel{}).
-		Where("status = ? AND auto_disabled_until > 0", common.ChannelStatusAutoDisabled).
+		Where(
+			"status = ? AND auto_disabled_until > 0 AND auto_disabled_until <= ? AND (scheduler_auto_recover_enabled IS NULL OR scheduler_auto_recover_enabled = ?)",
+			common.ChannelStatusAutoDisabled,
+			now,
+			true,
+		).
 		Limit(1).
 		Count(&count).Error
 	if err != nil {

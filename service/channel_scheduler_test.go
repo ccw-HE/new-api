@@ -591,6 +591,7 @@ func TestManualRestoreRules(t *testing.T) {
 	now := common.GetTimestamp()
 	// 不允许手动恢复
 	blocked := seedSchedulerChannel(t, seedChannelOptions{id: 311, name: "blocked", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000, manualRestoreAllowed: common.GetPointer(false)})
+	notExpired := seedSchedulerChannel(t, seedChannelOptions{id: 313, name: "not-expired", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
 	// 手动禁用渠道不属于调度器临时禁用
 	manual := seedSchedulerChannel(t, seedChannelOptions{id: 312, name: "manual", priority: 3, autoBan: 1, status: common.ChannelStatusManuallyDisabled})
 
@@ -599,9 +600,25 @@ func TestManualRestoreRules(t *testing.T) {
 	assert.Contains(t, err.Error(), "手动恢复")
 	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, blocked.Id).Status)
 
+	err = ManualRestoreSchedulerChannel(notExpired.Id, 1, "root")
+	require.Error(t, err)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, notExpired.Id).Status)
+	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventManualRestore, notExpired.Id))
+
 	err = ManualRestoreSchedulerChannel(manual.Id, 1, "root")
 	require.Error(t, err)
 	assert.Equal(t, common.ChannelStatusManuallyDisabled, reloadChannel(t, manual.Id).Status)
+}
+
+func TestHasSchedulerTempDisabledChannelsRequiresRecoverableChannel(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	seedSchedulerChannel(t, seedChannelOptions{id: 314, name: "future", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+	seedSchedulerChannel(t, seedChannelOptions{id: 315, name: "no-auto-recover", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now - 100, autoRecoverEnabled: common.GetPointer(false)})
+	assert.False(t, model.HasSchedulerTempDisabledChannels())
+
+	seedSchedulerChannel(t, seedChannelOptions{id: 316, name: "recoverable", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now - 100})
+	assert.True(t, model.HasSchedulerTempDisabledChannels())
 }
 
 // 临时禁用不得覆盖手动禁用（并发保护）

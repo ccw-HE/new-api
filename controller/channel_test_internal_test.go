@@ -111,6 +111,20 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 	require.Equal(t, 2, selected[1].Id)
 }
 
+func TestSchedulerRecoverHandlerEnabledRequiresRecoverableChannel(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+
+	setting := operation_setting.GetChannelSchedulerSetting()
+	saved := *setting
+	setting.Enabled = true
+	t.Cleanup(func() {
+		*operation_setting.GetChannelSchedulerSetting() = saved
+	})
+
+	require.False(t, schedulerRecoverHandler{}.Enabled())
+}
+
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))

@@ -16,20 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, RotateCcw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatTimestampToDate } from '@/lib/format'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+
+import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Dialog } from '@/components/dialog'
 import {
   getSchedulerChannelConfig,
   restoreSchedulerChannel,
@@ -37,6 +35,10 @@ import {
   updateSchedulerChannelConfig,
 } from '@/features/usage-logs/scheduler/api'
 import type { UpdateSchedulerChannelConfigPayload } from '@/features/usage-logs/scheduler/types'
+import { formatTimestampToDate } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { CHANNEL_STATUS } from '../../constants'
 import { channelsQueryKeys } from '../../lib'
 import { useChannels } from '../channels-provider'
@@ -130,12 +132,22 @@ export function ChannelSchedulerConfigDialog({
     config != null &&
     config.status === CHANNEL_STATUS.AUTO_DISABLED &&
     config.auto_disabled_until > 0
+  const isSchedulerDisableExpired =
+    isTempDisabled &&
+    config.auto_disabled_until <= Math.floor(Date.now() / 1000)
+  const canManualRestore =
+    isRoot &&
+    isSchedulerDisableExpired &&
+    config?.effective.scheduler_manual_restore_allowed
 
   const handleSave = () => {
     if (!form) return
     const retryTimes = form.retryTimes.trim()
     const disableSeconds = form.disableSeconds.trim()
-    if (retryTimes !== '' && (Number(retryTimes) < 1 || Number.isNaN(Number(retryTimes)))) {
+    if (
+      retryTimes !== '' &&
+      (Number(retryTimes) < 1 || Number.isNaN(Number(retryTimes)))
+    ) {
       toast.error(t('Failure threshold must be a positive number'))
       return
     }
@@ -223,7 +235,7 @@ export function ChannelSchedulerConfigDialog({
                     {formatTimestampToDate(config.auto_disabled_until)}
                   </span>
                 </span>
-                {isRoot && config.effective.scheduler_manual_restore_allowed && (
+                {canManualRestore && (
                   <Button
                     variant='outline'
                     size='sm'
@@ -253,9 +265,7 @@ export function ChannelSchedulerConfigDialog({
               checked={form.enabled}
               disabled={!isRoot}
               onCheckedChange={(checked) =>
-                setForm((prev) =>
-                  prev ? { ...prev, enabled: checked } : prev
-                )
+                setForm((prev) => (prev ? { ...prev, enabled: checked } : prev))
               }
             />
           </div>

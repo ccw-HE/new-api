@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useContext, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { type Row } from '@tanstack/react-table'
@@ -39,10 +38,11 @@ import {
   RotateCcw,
   FileText,
 } from 'lucide-react'
+import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -57,11 +57,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   restoreSchedulerChannel,
   schedulerQueryKeys,
 } from '@/features/usage-logs/scheduler/api'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
@@ -99,9 +101,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isSchedulerTempDisabled =
     channel.status === CHANNEL_STATUS.AUTO_DISABLED &&
     (channel.auto_disabled_until ?? 0) > 0
+  const isSchedulerDisableExpired =
+    isSchedulerTempDisabled &&
+    (channel.auto_disabled_until ?? 0) <= Math.floor(Date.now() / 1000)
   const canManualRestore =
     isRoot &&
     isSchedulerTempDisabled &&
+    isSchedulerDisableExpired &&
     channel.scheduler_manual_restore_allowed !== false
 
   const handleEdit = () => {
@@ -140,13 +146,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     e.stopPropagation()
     setIsTesting(true)
     try {
-      await handleTestChannel(
-        channel.id,
-        { channelName: channel.name },
-        () => {
-          queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
-        }
-      )
+      await handleTestChannel(channel.id, { channelName: channel.name }, () => {
+        queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      })
     } finally {
       setIsTesting(false)
     }

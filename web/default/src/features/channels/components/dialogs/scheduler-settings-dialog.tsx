@@ -16,15 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { Loader2, RotateCcw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatTimestampToDate } from '@/lib/format'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+
+import { Dialog } from '@/components/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,7 +38,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog } from '@/components/dialog'
 import {
   getSchedulerDisabledChannels,
   getSchedulerGlobalConfig,
@@ -48,6 +46,10 @@ import {
   updateSchedulerGlobalConfig,
 } from '@/features/usage-logs/scheduler/api'
 import type { SchedulerGlobalConfig } from '@/features/usage-logs/scheduler/types'
+import { formatTimestampToDate } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { channelsQueryKeys } from '../../lib'
 
 type SchedulerSettingsDialogProps = {
@@ -84,7 +86,10 @@ export function SchedulerSettingsDialog({
     >
       <div className='space-y-4 py-2'>
         <div className='flex items-center justify-between gap-2'>
-          <Tabs value={tab} onValueChange={(value) => setTab(value as PanelTab)}>
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as PanelTab)}
+          >
             <TabsList>
               <TabsTrigger value='disabled'>
                 {t('Temp-Disabled Channels')}
@@ -148,6 +153,8 @@ function DisabledChannelsPanel({
     },
   })
 
+  const nowSeconds = Math.floor(Date.now() / 1000)
+
   if (isLoading) {
     return (
       <div className='text-muted-foreground flex items-center gap-2 py-8 text-sm'>
@@ -179,63 +186,70 @@ function DisabledChannelsPanel({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {channels.map((channel) => (
-            <TableRow key={channel.id}>
-              <TableCell>
-                <div className='flex min-w-0 flex-col'>
-                  <span className='truncate text-xs font-medium'>
-                    {channel.name}
-                  </span>
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    #{channel.id}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell className='font-mono text-xs'>
-                {channel.priority}
-              </TableCell>
-              <TableCell className='max-w-52'>
-                <span
-                  className='line-clamp-2 text-xs break-all'
-                  title={channel.status_reason}
-                >
-                  {channel.status_reason || '-'}
-                </span>
-              </TableCell>
-              <TableCell className='font-mono text-xs'>
-                {formatTimestampToDate(channel.auto_disabled_until)}
-              </TableCell>
-              <TableCell>
-                <Badge
-                  variant={
-                    channel.scheduler_auto_recover_enabled
-                      ? 'secondary'
-                      : 'outline'
-                  }
-                  className='text-xs'
-                >
-                  {channel.scheduler_auto_recover_enabled
-                    ? t('Enabled')
-                    : t('Disabled')}
-                </Badge>
-              </TableCell>
-              <TableCell className='text-right'>
-                {isRoot && channel.manual_restore_allowed ? (
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    disabled={restoreMutation.isPending}
-                    onClick={() => restoreMutation.mutate(channel.id)}
+          {channels.map((channel) => {
+            const canManualRestore =
+              isRoot &&
+              channel.manual_restore_allowed &&
+              channel.auto_disabled_until <= nowSeconds
+
+            return (
+              <TableRow key={channel.id}>
+                <TableCell>
+                  <div className='flex min-w-0 flex-col'>
+                    <span className='truncate text-xs font-medium'>
+                      {channel.name}
+                    </span>
+                    <span className='text-muted-foreground font-mono text-xs'>
+                      #{channel.id}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className='font-mono text-xs'>
+                  {channel.priority}
+                </TableCell>
+                <TableCell className='max-w-52'>
+                  <span
+                    className='line-clamp-2 text-xs break-all'
+                    title={channel.status_reason}
                   >
-                    <RotateCcw className='mr-1 size-3.5' />
-                    {t('Restore')}
-                  </Button>
-                ) : (
-                  <span className='text-muted-foreground text-xs'>-</span>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
+                    {channel.status_reason || '-'}
+                  </span>
+                </TableCell>
+                <TableCell className='font-mono text-xs'>
+                  {formatTimestampToDate(channel.auto_disabled_until)}
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    variant={
+                      channel.scheduler_auto_recover_enabled
+                        ? 'secondary'
+                        : 'outline'
+                    }
+                    className='text-xs'
+                  >
+                    {channel.scheduler_auto_recover_enabled
+                      ? t('Enabled')
+                      : t('Disabled')}
+                  </Badge>
+                </TableCell>
+                <TableCell className='text-right'>
+                  {canManualRestore ? (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      disabled={restoreMutation.isPending}
+                      onClick={() => restoreMutation.mutate(channel.id)}
+                    >
+                      <RotateCcw className='mr-1 size-3.5' />
+                      {t('Restore')}
+                    </Button>
+                  ) : (
+                    <span className='text-muted-foreground text-xs'>-</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
     </div>
@@ -297,7 +311,10 @@ const SWITCH_FIELDS: Array<{
 ]
 
 const NUMBER_FIELDS: Array<{
-  key: 'channel_failure_threshold' | 'auto_disable_seconds' | 'max_attempts_per_request'
+  key:
+    | 'channel_failure_threshold'
+    | 'auto_disable_seconds'
+    | 'max_attempts_per_request'
   label: string
   description: string
   min: number
@@ -314,7 +331,8 @@ const NUMBER_FIELDS: Array<{
   {
     key: 'auto_disable_seconds',
     label: 'Auto Disable Seconds',
-    description: 'Temporary disable duration in seconds. Default 7200 (2 hours).',
+    description:
+      'Temporary disable duration in seconds. Default 7200 (2 hours).',
     min: 1,
     max: 2592000,
   },
@@ -369,7 +387,12 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
     for (const field of NUMBER_FIELDS) {
       const raw = (numberDrafts[field.key] ?? '').trim()
       const value = Number(raw)
-      if (raw === '' || Number.isNaN(value) || value < field.min || value > field.max) {
+      if (
+        raw === '' ||
+        Number.isNaN(value) ||
+        value < field.min ||
+        value > field.max
+      ) {
         toast.error(
           `${t(field.label)}: ${t('must be a number between')} ${field.min} - ${field.max}`
         )

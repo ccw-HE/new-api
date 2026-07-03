@@ -410,7 +410,10 @@ func ManualRestoreSchedulerChannel(channelId int, operatorId int, operatorName s
 	if !channel.GetSchedulerManualRestoreAllowed() {
 		return errors.New("该渠道已关闭手动恢复")
 	}
-	if !model.SchedulerRecoverChannel(channelId, false) {
+	if channel.AutoDisabledUntil > common.GetTimestamp() {
+		return errors.New("该渠道临时禁用尚未到期")
+	}
+	if !model.SchedulerRecoverChannel(channelId, true) {
 		return errors.New("恢复渠道失败")
 	}
 	model.InitChannelCache()

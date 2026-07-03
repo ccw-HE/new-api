@@ -154,16 +154,13 @@ func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, run
 }
 
 // schedulerRecoverHandler 周期恢复到期的调度器临时禁用渠道。
-// Enabled() 在调度器开启、或仍存在临时禁用渠道（调度器已被关闭的存量场景）时为真，
-// 保证关闭调度器后已禁用的渠道依然能按期恢复。
+// Enabled() 只在存在已到期且允许自动恢复的渠道时为真，避免空跑任务刷表；
+// 调度器总开关关闭后，存量可自动恢复渠道仍会按期恢复。
 type schedulerRecoverHandler struct{}
 
 func (schedulerRecoverHandler) Type() string { return model.SystemTaskTypeSchedulerRecover }
 
 func (schedulerRecoverHandler) Enabled() bool {
-	if operation_setting.GetChannelSchedulerSetting().Enabled {
-		return true
-	}
 	return model.HasSchedulerTempDisabledChannels()
 }
 

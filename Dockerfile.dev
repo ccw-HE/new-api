@@ -1,6 +1,8 @@
 # Backend-only build for frontend development
 # Skips frontend build, uses a placeholder for //go:embed web/dist
 
+ARG SOURCE_COMMIT=unknown
+
 FROM golang:1.26.1-alpine AS builder
 
 ENV GO111MODULE=on CGO_ENABLED=0
@@ -23,6 +25,9 @@ RUN mkdir -p web/default/dist web/classic/dist && \
 RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
 
 FROM debian:bookworm-slim
+
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_COMMIT}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata wget \

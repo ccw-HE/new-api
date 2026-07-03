@@ -19,6 +19,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-unknown}
     image: new-api-dev:local
     container_name: new-api-dev
     restart: unless-stopped
