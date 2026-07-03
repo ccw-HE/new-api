@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import z from 'zod'
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 import { UsageLogs } from '@/features/usage-logs'
 import {
   isUsageLogsSectionId,
@@ -47,6 +49,9 @@ const usageLogsSearchSchema = z.object({
   username: z.string().optional().catch(''),
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
+  // scheduler section filters
+  eventType: z.string().optional().catch(''),
+  priority: z.string().optional().catch(''),
   startTime: z.number().optional(),
   endTime: z.number().optional(),
 })
@@ -58,6 +63,13 @@ export const Route = createFileRoute('/_authenticated/usage-logs/$section')({
         to: '/usage-logs/$section',
         params: { section: USAGE_LOGS_DEFAULT_SECTION },
       })
+    }
+    // 调度日志仅管理员可见（日志包含渠道名、上游错误与运营策略）
+    if (params.section === 'scheduler') {
+      const { auth } = useAuthStore.getState()
+      if (!auth.user || auth.user.role < ROLE.ADMIN) {
+        throw redirect({ to: '/403' })
+      }
     }
     // type 仅 common 使用，非 common 时清掉 URL 里的 type
     const hasTypeSearch = Array.isArray(search?.type)

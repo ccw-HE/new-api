@@ -71,6 +71,13 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  // channel scheduler fields (nullish = inherit global default)
+  auto_disabled_until: z.number().nullish(),
+  scheduler_enabled: z.boolean().nullish(),
+  scheduler_retry_times: z.number().nullish(),
+  scheduler_auto_disable_seconds: z.number().nullish(),
+  scheduler_auto_recover_enabled: z.boolean().nullish(),
+  scheduler_manual_restore_allowed: z.boolean().nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
