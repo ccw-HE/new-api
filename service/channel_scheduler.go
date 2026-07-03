@@ -164,11 +164,24 @@ func (s *ChannelSchedulerSession) NextChannel() (*model.Channel, bool) {
 				if s.excluded[candidate.Id] {
 					continue
 				}
-				if !s.setting.RetrySameChannel && s.current != nil && candidate.Id == s.current.Id && len(bucket.Channels) > 1 {
-					// 关闭同渠道连续重试时，优先换一个渠道
+				// 过滤已被并发请求禁用的渠道，减少注定失败的尝试
+				if candidate.Status != common.ChannelStatusEnabled {
 					continue
 				}
 				candidates = append(candidates, candidate)
+			}
+			// 关闭同渠道连续重试时优先换一个渠道；
+			// 以过滤后的可用候选数判断，仅剩当前渠道时仍继续使用它
+			if !s.setting.RetrySameChannel && s.current != nil && len(candidates) > 1 {
+				withoutCurrent := make([]*model.Channel, 0, len(candidates))
+				for _, candidate := range candidates {
+					if candidate.Id != s.current.Id {
+						withoutCurrent = append(withoutCurrent, candidate)
+					}
+				}
+				if len(withoutCurrent) > 0 {
+					candidates = withoutCurrent
+				}
 			}
 			if len(candidates) > 0 {
 				channel := pickWeightedChannel(candidates)
@@ -320,17 +333,12 @@ func (s *ChannelSchedulerSession) buildLogEntry(channel *model.Channel, apiErr *
 }
 
 // TempDisableChannelForScheduler 执行调度器临时禁用：
-// status 置为 auto disabled、写 other_info 状态原因、同步 ability 与内存缓存，
-// 并设置 auto_disabled_until 到期时间。返回 (到期时间, 是否真正执行了禁用)。
-// 并发下重复禁用是幂等的：已处于目标状态时 UpdateChannelStatus 返回 false，
-// 不重复刷新到期时间；手动禁用（status=2）的渠道不会被覆盖。
+// status 与 auto_disabled_until 由 model.SchedulerTempDisableChannel 原子写入，
+// 同时写 other_info 状态原因、同步 ability 与内存缓存。
+// 返回 (到期时间, 是否真正执行了禁用)。前置条件为渠道当前处于启用状态，
+// 并发下重复禁用、覆盖手动禁用都会被拒绝（返回 false）。
 func TempDisableChannelForScheduler(channel *model.Channel, apiErr *types.NewAPIError, seconds int) (int64, bool) {
 	if channel == nil || channel.Id == 0 {
-		return 0, false
-	}
-	// 重新读取当前状态，避免覆盖刚被管理员手动禁用的渠道
-	fresh, err := model.CacheGetChannel(channel.Id)
-	if err != nil || fresh == nil || fresh.Status != common.ChannelStatusEnabled {
 		return 0, false
 	}
 	reason := "channel scheduler: consecutive failure threshold reached"
@@ -338,11 +346,8 @@ func TempDisableChannelForScheduler(channel *model.Channel, apiErr *types.NewAPI
 		reason = fmt.Sprintf("channel scheduler: consecutive failures reached threshold, last error: %s", apiErr.MaskSensitiveErrorWithStatusCode())
 	}
 	disabledUntil := common.GetTimestamp() + int64(seconds)
-	if !model.UpdateChannelStatus(channel.Id, "", common.ChannelStatusAutoDisabled, reason) {
+	if !model.SchedulerTempDisableChannel(channel.Id, reason, disabledUntil) {
 		return 0, false
-	}
-	if err := model.SetChannelAutoDisabledUntil(channel.Id, disabledUntil); err != nil {
-		return disabledUntil, true
 	}
 	common.SysLog(fmt.Sprintf("channel scheduler temporarily disabled channel「%s」(#%d) for %d seconds, until %d", channel.Name, channel.Id, seconds, disabledUntil))
 	subject := fmt.Sprintf("渠道「%s」（#%d）已被调度器临时禁用", channel.Name, channel.Id)
@@ -368,10 +373,10 @@ func RecoverExpiredSchedulerChannels() (int, error) {
 		if !channel.GetSchedulerAutoRecoverEnabled() {
 			continue
 		}
-		if !model.UpdateChannelStatus(channel.Id, "", common.ChannelStatusEnabled, "") {
+		// 原子恢复：锁内重新校验 status/until/到期，避免覆盖并发写入的新一轮禁用
+		if !model.SchedulerRecoverChannel(channel.Id, true) {
 			continue
 		}
-		_ = model.SetChannelAutoDisabledUntil(channel.Id, 0)
 		recovered++
 		common.SysLog(fmt.Sprintf("channel scheduler auto recovered channel「%s」(#%d)", channel.Name, channel.Id))
 		if logEnabled {
@@ -405,10 +410,9 @@ func ManualRestoreSchedulerChannel(channelId int, operatorId int, operatorName s
 	if !channel.GetSchedulerManualRestoreAllowed() {
 		return errors.New("该渠道已关闭手动恢复")
 	}
-	if !model.UpdateChannelStatus(channelId, "", common.ChannelStatusEnabled, "") {
+	if !model.SchedulerRecoverChannel(channelId, false) {
 		return errors.New("恢复渠道失败")
 	}
-	_ = model.SetChannelAutoDisabledUntil(channelId, 0)
 	model.InitChannelCache()
 	if operation_setting.GetChannelSchedulerSetting().LogEnabled {
 		model.RecordChannelSchedulerLog(&model.ChannelSchedulerLog{

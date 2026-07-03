@@ -65,6 +65,75 @@ func SetChannelAutoDisabledUntil(channelId int, until int64) error {
 	return nil
 }
 
+// SchedulerTempDisableChannel 原子地把处于启用状态的渠道置为调度器临时禁用：
+// status 与 auto_disabled_until 在同一把 channelStatusLock 内一次写入，
+// 不存在"status=3 但 until=0"的中间态。前置条件为当前 status=启用（CAS 语义），
+// 因此并发的手动禁用、旧式自动禁用或另一个会话的临时禁用都不会被覆盖。
+func SchedulerTempDisableChannel(channelId int, reason string, until int64) bool {
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
+
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return false
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return false
+	}
+	info := channel.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+	channel.Status = common.ChannelStatusAutoDisabled
+	channel.AutoDisabledUntil = until
+	if err := channel.SaveWithoutKey(); err != nil {
+		common.SysError(fmt.Sprintf("failed to temp disable channel: channel_id=%d, error=%v", channelId, err))
+		return false
+	}
+	if err := UpdateAbilityStatus(channelId, false); err != nil {
+		common.SysError(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+	}
+	if common.MemoryCacheEnabled {
+		CacheUpdateChannelStatus(channelId, common.ChannelStatusAutoDisabled)
+		CacheSetChannelAutoDisabledUntil(channelId, until)
+	}
+	return true
+}
+
+// SchedulerRecoverChannel 原子地恢复调度器临时禁用的渠道。
+// 仅当 status=auto_disabled 且 auto_disabled_until>0 时执行；
+// requireExpired 为 true 时（自动恢复）还要求到期时间已过——
+// 在锁内以数据库当前值判定，避免恢复任务覆盖并发会话刚写入的新一轮禁用。
+func SchedulerRecoverChannel(channelId int, requireExpired bool) bool {
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
+
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return false
+	}
+	if channel.Status != common.ChannelStatusAutoDisabled || channel.AutoDisabledUntil == 0 {
+		return false
+	}
+	if requireExpired && channel.AutoDisabledUntil > common.GetTimestamp() {
+		return false
+	}
+	channel.Status = common.ChannelStatusEnabled
+	channel.AutoDisabledUntil = 0
+	if err := channel.SaveWithoutKey(); err != nil {
+		common.SysError(fmt.Sprintf("failed to recover channel: channel_id=%d, error=%v", channelId, err))
+		return false
+	}
+	if err := UpdateAbilityStatus(channelId, true); err != nil {
+		common.SysError(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+	}
+	if common.MemoryCacheEnabled {
+		CacheUpdateChannelStatus(channelId, common.ChannelStatusEnabled)
+		CacheSetChannelAutoDisabledUntil(channelId, 0)
+	}
+	return true
+}
+
 // GetSchedulerTempDisabledChannels 当前处于调度器临时禁用状态的渠道
 // （status=auto_disabled 且 auto_disabled_until > 0）。
 func GetSchedulerTempDisabledChannels() ([]*Channel, error) {

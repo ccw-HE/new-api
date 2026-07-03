@@ -403,6 +403,96 @@ func TestSchedulerSessionChannelLevelOverrides(t *testing.T) {
 	assert.GreaterOrEqual(t, reloadedB.AutoDisabledUntil, before+7200)
 }
 
+// 关闭同渠道连续重试：优先换渠道；同级仅剩当前渠道时继续使用它而不是放弃
+func TestSchedulerSessionRetrySameChannelDisabled(t *testing.T) {
+	schedulerCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.ChannelFailureThreshold = 10
+		s.RetrySameChannel = false
+		s.AllowPriorityFallback = false
+		s.MaxAttemptsPerRequest = 20
+	})
+	chA := seedSchedulerChannel(t, seedChannelOptions{id: 341, name: "A", priority: 3, autoBan: 1})
+	chB := seedSchedulerChannel(t, seedChannelOptions{id: 342, name: "B", priority: 3, autoBan: 1})
+	seedSchedulerChannel(t, seedChannelOptions{id: 343, name: "C", priority: 2, autoBan: 1})
+
+	session := newSchedulerSessionForTest(t)
+	channel := session.AdoptInitialChannel(chA.Id)
+	require.NotNil(t, channel)
+
+	// A 失败一次后应换到同级 B
+	session.RecordFailure(channel, mockUpstreamError(), true)
+	next, ok := session.NextChannel()
+	require.True(t, ok)
+	assert.Equal(t, chB.Id, next.Id)
+
+	// B 被排除（如装配失败）后，同级仅剩 A：应继续使用 A 而不是降级或放弃
+	session.ExcludeChannel(chB.Id)
+	session.RecordFailure(chA, mockUpstreamError(), true)
+	next, ok = session.NextChannel()
+	require.True(t, ok, "sole remaining same-priority channel must stay usable")
+	assert.Equal(t, chA.Id, next.Id)
+}
+
+// 候选过滤跳过已被并发禁用的渠道
+func TestSchedulerSessionSkipsConcurrentlyDisabledCandidates(t *testing.T) {
+	schedulerCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.ChannelFailureThreshold = 1
+		s.MaxAttemptsPerRequest = 10
+	})
+	chA := seedSchedulerChannel(t, seedChannelOptions{id: 351, name: "A", priority: 3, autoBan: 1})
+	chB := seedSchedulerChannel(t, seedChannelOptions{id: 352, name: "B", priority: 3, autoBan: 1})
+	chC := seedSchedulerChannel(t, seedChannelOptions{id: 353, name: "C", priority: 2, autoBan: 1})
+
+	session := newSchedulerSessionForTest(t)
+	channel := session.AdoptInitialChannel(chA.Id)
+	require.NotNil(t, channel)
+	session.RecordFailure(channel, mockUpstreamError(), true) // A 达到阈值被禁用
+
+	// 模拟并发请求把 B 手动禁用（会话候选快照中的 B 状态同步变更）
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", chB.Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+	for _, group := range sessionGroupsForTest(session) {
+		for _, bucket := range group.buckets {
+			for _, candidate := range bucket.Channels {
+				if candidate.Id == chB.Id {
+					candidate.Status = common.ChannelStatusManuallyDisabled
+				}
+			}
+		}
+	}
+
+	next, ok := session.NextChannel()
+	require.True(t, ok)
+	assert.Equal(t, chC.Id, next.Id, "disabled B should be skipped, fallback to C")
+}
+
+func sessionGroupsForTest(s *ChannelSchedulerSession) []schedulerGroupCandidates {
+	return s.groups
+}
+
+// 原子恢复：未到期的临时禁用不会被自动恢复路径覆盖（恢复任务与新一轮禁用竞争的保护）
+func TestSchedulerRecoverChannelAtomicGuards(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	fresh := seedSchedulerChannel(t, seedChannelOptions{id: 361, name: "fresh", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 3000})
+
+	// requireExpired=true（自动恢复）：未到期必须拒绝
+	assert.False(t, model.SchedulerRecoverChannel(fresh.Id, true))
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, fresh.Id).Status)
+
+	// requireExpired=false（手动恢复）：允许
+	assert.True(t, model.SchedulerRecoverChannel(fresh.Id, false))
+	reloaded := reloadChannel(t, fresh.Id)
+	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
+	assert.EqualValues(t, 0, reloaded.AutoDisabledUntil)
+
+	// 临时禁用的 CAS 前置：非启用状态不会被覆盖
+	manual := seedSchedulerChannel(t, seedChannelOptions{id: 362, name: "manual", priority: 3, autoBan: 1, status: common.ChannelStatusManuallyDisabled})
+	assert.False(t, model.SchedulerTempDisableChannel(manual.Id, "test", now+100))
+	assert.Equal(t, common.ChannelStatusManuallyDisabled, reloadChannel(t, manual.Id).Status)
+}
+
 // 关闭降级：同级耗尽后不落到低优先级
 func TestSchedulerSessionNoPriorityFallback(t *testing.T) {
 	schedulerCleanup(t)
