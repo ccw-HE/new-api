@@ -38,3 +38,18 @@ func TestChannelSchedulerRoutesIncludeHyphenCompatibleAliases(t *testing.T) {
 	assert.Contains(t, routes, "PUT /api/channel-scheduler/channel/:id/config")
 	assert.Contains(t, routes, "POST /api/channel-scheduler/restore/:id")
 }
+
+func TestChannelListRouteAcceptsNoTrailingSlash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	routes := make(map[string]struct{})
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = struct{}{}
+	}
+
+	require.Contains(t, routes, "GET /api/channel/")
+	assert.Contains(t, routes, "GET /api/channel")
+	assert.Contains(t, routes, "POST /api/channel")
+}
