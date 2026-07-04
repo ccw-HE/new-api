@@ -23,6 +23,7 @@
 - [x] T13 前端验证：default typecheck+build 通过；classic build 通过（classic 本期仅保证构建不坏）
 - [x] T14 验收：本地端到端验收 27/27 全部通过（mock 上游 + SQLite + 内存缓存：A×3→禁用7200s→B×3→禁用→C 成功；渠道级阈值/时长覆盖精确生效；手动恢复；恢复 API 拒绝手动禁用渠道；调度日志/统计/临时禁用列表正确）。dev compose 已完成 rebuild/API 冒烟：`new-api-dev:local` 镜像源码戳为 `42ce882ec7b53321`，`/api/channel_scheduler/logs`、`/logs/stat`、`/disabled`、`/config`、`/channel/1/config`、`/restore/1` 均返回鉴权响应而非 404，覆盖截图 1/2 的调度器接口 404 问题。
 - [x] T15 多视角对抗审查完成（15 代理）：确认 8 项问题已全部修复（i18n 命名空间、auto_disabled_until 残留、多 Key 渠道 key 级禁用保留、会话失败降级、索引定义、默认时间范围、数字输入、禁用通知）；复审新增 2 项恢复语义问题（未到期手动恢复、不可自动恢复渠道唤醒恢复任务）已修复并补测试。
+- [x] T16 截图 404 二次修复：为调度器后端 API 增加 `/api/channel-scheduler/*` 兼容别名，与标准 `/api/channel_scheduler/*` 共用同一套 controller 和鉴权链路；新增路由表回归测试，防止旧前端包或浏览器缓存继续请求 hyphen 路径时返回 404。
 
 ## 关键设计决定（依据计划书）
 
@@ -59,3 +60,4 @@ cd web/classic && bun run build
 - 2026-07-03: 复审修复验证：新增 TestSchedulerRecoverHandlerEnabledRequiresRecoverableChannel 先红后绿；一键启动.bat probe 输出内容哈希 Source stamp 并判定旧镜像需 rebuild；Docker Go 环境 go test ./service ./model ./controller ./setting/operation_setting 通过，go build ./... 通过；web/default typecheck/build 通过，web/classic build 通过；git diff --check 通过。
 - 2026-07-04: 补做 dev compose 冒烟：`一键启动.bat probe` 输出 Source stamp `42ce882ec7b53321` 且判定需 rebuild；执行 `docker compose -f docker-compose.dev.yml up -d --build new-api` 后后端容器启动完成；六个前端调度器 API 路径均返回 401 Unauthorized 而不是 404，说明开发后端已加载新路由。观察到 Docker build context 约 3.36GB，后续可单独优化 `.dockerignore`，本阶段不扩大改动面。
 - 2026-07-04: 最终验收复跑通过：便携 Go 环境 `go test ./service ./model ./controller ./setting/operation_setting` 通过，`go build ./...` 通过；Bun 环境 `web/default` 的 `bun run typecheck` 与 `bun run build` 通过，`web/classic` 的 `bun run build` 通过；`git diff --check` 通过，提交后工作区保持干净。
+- 2026-07-04: 针对用户最新截图继续排查渠道页标题旁“调度器”入口与“调度日志”页 404。当前标准路径 `/api/channel_scheduler/*` 在 3000/3001 均已返回 401 非 404；复现到旧命名 `/api/channel-scheduler/*` 仍为 404，按 TDD 新增 `TestChannelSchedulerRoutesIncludeHyphenCompatibleAliases` 先红后绿，并在 `router/api-router.go` 中给同一组调度器 API 注册 hyphen 兼容别名。验证：`go test ./router ./service ./model ./controller ./setting/operation_setting` 通过，`go build ./...` 通过；本机无 Bun，改用 npm workspace 等价执行 `default` typecheck/build 与 `classic` build 均通过；重建 `new-api-dev` 后，3000 与 3001 上 underscore/hyphen 两组 14 个调度器 API 探针均返回 401 而非 404。
