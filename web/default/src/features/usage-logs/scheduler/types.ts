@@ -107,16 +107,16 @@ export interface SchedulerDisabledChannel {
 
 export interface SchedulerGlobalConfig {
   enabled: boolean
-  observation_only: boolean
   channel_failure_threshold: number
   auto_disable_seconds: number
+  retry_jitter_min_ms: number
+  retry_jitter_max_ms: number
   allow_priority_fallback: boolean
   log_enabled: boolean
   respect_auto_ban: boolean
   retry_same_channel: boolean
   max_attempts_per_request: number
   enable_for_stream: boolean
-  enable_for_task_relay: boolean
 }
 
 export interface SchedulerChannelConfig {

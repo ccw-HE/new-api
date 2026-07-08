@@ -231,7 +231,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
 			processChannelError(c, channelError, newAPIError)
-			service.ObserveChannelFailureForScheduler(c, channelError, newAPIError)
 
 			if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 				break
@@ -321,6 +320,11 @@ func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo,
 			relayInfo.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, relayInfo)
 		}
 
+		if attempt > 0 {
+			if jitterErr := session.WaitBeforeRetry(); jitterErr != nil {
+				return jitterErr
+			}
+		}
 		relayInfo.RetryIndex = attempt
 		addUsedChannel(c, channel.Id)
 		if bodyErr := rewindRequestBody(c); bodyErr != nil {

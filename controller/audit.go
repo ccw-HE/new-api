@@ -47,7 +47,7 @@ var auditContentTemplates = map[string]string{
 
 	"channel.scheduler_config":  "Updated scheduler config of channel ${name} (ID: ${id})",
 	"channel.scheduler_restore": "Manually restored scheduler-disabled channel (ID: ${id})",
-	"scheduler.config_update":   "Updated channel scheduler global config (enabled: ${enabled}, observation_only: ${observation_only})",
+	"scheduler.config_update":   "Updated channel scheduler global config (enabled: ${enabled}, retry_jitter: ${retry_jitter_min_ms}-${retry_jitter_max_ms}ms)",
 	"scheduler.logs_cleanup":    "Cleaned up ${count} channel scheduler logs",
 
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",

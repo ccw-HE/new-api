@@ -51,6 +51,7 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { channelsQueryKeys } from '../../lib'
+import { NumericSpinnerInput } from '../numeric-spinner-input'
 
 type SchedulerSettingsDialogProps = {
   open: boolean
@@ -268,12 +269,6 @@ const SWITCH_FIELDS: Array<{
       'Master switch. When off, the legacy retry behavior is used unchanged.',
   },
   {
-    key: 'observation_only',
-    label: 'Observation Mode',
-    description:
-      'Only record scheduler logs without changing any scheduling behavior. Recommended before enabling.',
-  },
-  {
     key: 'log_enabled',
     label: 'Scheduler Logging',
     description: 'Write independent scheduler logs for failures and disables.',
@@ -301,12 +296,6 @@ const SWITCH_FIELDS: Array<{
     label: 'Enable for Streaming Requests',
     description:
       'Not recommended for the first rollout: partially streamed responses cannot be retried safely.',
-  },
-  {
-    key: 'enable_for_task_relay',
-    label: 'Enable for Task Relay',
-    description:
-      'Reserved for a future version. Task relays (Midjourney/Suno/video) currently keep the legacy retry behavior.',
   },
 ]
 
@@ -346,6 +335,17 @@ const NUMBER_FIELDS: Array<{
   },
 ]
 
+const JITTER_MIN_SECONDS = 0.1
+const JITTER_MAX_SECONDS = 10
+
+function jitterMillisecondsToSeconds(value: number | undefined) {
+  return Number(((value ?? 0) / 1000).toFixed(1))
+}
+
+function jitterSecondsToMilliseconds(value: number) {
+  return Math.round(value * 1000)
+}
+
 function GlobalConfigPanel({ active }: { active: boolean }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -360,7 +360,11 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (data?.success && data.data) {
-      setConfig(data.data)
+      setConfig({
+        ...data.data,
+        retry_jitter_min_ms: data.data.retry_jitter_min_ms ?? 0,
+        retry_jitter_max_ms: data.data.retry_jitter_max_ms ?? 0,
+      })
       setNumberDrafts({
         channel_failure_threshold: String(data.data.channel_failure_threshold),
         auto_disable_seconds: String(data.data.auto_disable_seconds),
@@ -399,6 +403,20 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
         return
       }
       parsed[field.key] = value
+    }
+    const jitterMinMs = config.retry_jitter_min_ms
+    const jitterMaxMs = config.retry_jitter_max_ms
+    const jitterDisabled = jitterMinMs === 0 && jitterMaxMs === 0
+    const jitterValid =
+      jitterDisabled ||
+      (jitterMinMs >= 100 &&
+        jitterMaxMs <= 10000 &&
+        jitterMinMs <= jitterMaxMs)
+    if (!jitterValid) {
+      toast.error(
+        `${t('Retry Jitter')}: ${t('must be 0/0 or between 0.1 and 10 seconds')}`
+      )
+      return
     }
     saveMutation.mutate({
       ...config,
@@ -441,6 +459,64 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
             />
           </div>
         ))}
+        <div className='space-y-2'>
+          <div className='space-y-0.5'>
+            <Label className='text-sm'>{t('Retry Jitter')}</Label>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Random delay before each scheduler retry. Set both values to 0 to disable.'
+              )}
+            </p>
+          </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <NumericSpinnerInput
+              label={t('Minimum Delay')}
+              value={jitterMillisecondsToSeconds(
+                config.retry_jitter_min_ms
+              )}
+              onChange={(value) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        retry_jitter_min_ms:
+                          jitterSecondsToMilliseconds(value),
+                      }
+                    : prev
+                )
+              }
+              min={0}
+              max={JITTER_MAX_SECONDS}
+              step={JITTER_MIN_SECONDS}
+              decimalPlaces={1}
+            />
+            <span className='text-muted-foreground text-xs'>-</span>
+            <NumericSpinnerInput
+              label={t('Maximum Delay')}
+              value={jitterMillisecondsToSeconds(
+                config.retry_jitter_max_ms
+              )}
+              onChange={(value) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        retry_jitter_max_ms:
+                          jitterSecondsToMilliseconds(value),
+                      }
+                    : prev
+                )
+              }
+              min={0}
+              max={JITTER_MAX_SECONDS}
+              step={JITTER_MIN_SECONDS}
+              decimalPlaces={1}
+            />
+            <span className='text-muted-foreground text-xs'>
+              {t('seconds')}
+            </span>
+          </div>
+        </div>
         {NUMBER_FIELDS.map((field) => (
           <div key={field.key} className='space-y-1'>
             <Label className='text-sm' htmlFor={`scheduler-${field.key}`}>

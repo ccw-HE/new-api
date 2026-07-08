@@ -226,6 +226,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			break
 		}
 	}
+	if !service.HasOpenAITextDeliverable(&simpleResponse) {
+		return nil, service.NewEmptyResponseError("openai", "no content, reasoning, or tool calls")
+	}
 
 	forceFormat := false
 	if info.ChannelSetting.ForceFormat {

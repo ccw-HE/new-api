@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,13 +26,10 @@ import (
 // 失败计数为单次请求内计数（不做跨节点全局计数），并发一致性依赖
 // model.UpdateChannelStatus 的幂等语义与会话本地排除集。
 
-const schedulerObserveFailuresKey = "scheduler_observe_failures"
-
 // ShouldUseChannelScheduler 判断当前请求是否由高级调度器接管渠道选择。
-// 观察模式（ObservationOnly=true）不接管，只在 processChannelError 附近记日志。
 func ShouldUseChannelScheduler(c *gin.Context, isStream bool) bool {
 	s := operation_setting.GetChannelSchedulerSetting()
-	if !s.Enabled || s.ObservationOnly {
+	if !s.Enabled {
 		return false
 	}
 	if isStream && !s.EnableForStream {
@@ -210,6 +208,35 @@ func (s *ChannelSchedulerSession) RemainingAttempts() int {
 		return 0
 	}
 	return remaining
+}
+
+func (s *ChannelSchedulerSession) WaitBeforeRetry() *types.NewAPIError {
+	minDelay, maxDelay := s.setting.RetryJitterRange()
+	delay := randomSchedulerRetryJitter(minDelay, maxDelay)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-s.ctx.Request.Context().Done():
+		return types.NewErrorWithStatusCode(s.ctx.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusRequestTimeout, types.ErrOptionWithSkipRetry())
+	}
+}
+
+func randomSchedulerRetryJitter(minDelay time.Duration, maxDelay time.Duration) time.Duration {
+	if minDelay <= 0 || maxDelay <= 0 {
+		return 0
+	}
+	if maxDelay < minDelay {
+		return 0
+	}
+	if maxDelay == minDelay {
+		return minDelay
+	}
+	return minDelay + time.Duration(rand.Int63n(int64(maxDelay-minDelay)+1))
 }
 
 // CurrentGroup 当前选中渠道所属分组（auto 分组场景与 tokenGroup 不同）。
@@ -431,82 +458,6 @@ func ManualRestoreSchedulerChannel(channelId int, operatorId int, operatorName s
 		})
 	}
 	return nil
-}
-
-// ObserveChannelFailureForScheduler 观察模式日志钩子：
-// 不改变任何调度行为，只在渠道失败时记录 failure 日志，
-// 并模拟阈值判定记录 observe_disable 日志，供启用高级调度前评估影响。
-// 仅当 ObservationOnly=true 且 LogEnabled=true 时生效（不要求总开关打开）。
-func ObserveChannelFailureForScheduler(c *gin.Context, channelError types.ChannelError, apiErr *types.NewAPIError) {
-	s := operation_setting.GetChannelSchedulerSetting()
-	if !s.ObservationOnly || !s.LogEnabled {
-		return
-	}
-	failures := map[int]int{}
-	if v, ok := c.Get(schedulerObserveFailuresKey); ok {
-		if m, ok := v.(map[int]int); ok {
-			failures = m
-		}
-	}
-	failures[channelError.ChannelId]++
-	c.Set(schedulerObserveFailuresKey, failures)
-	attemptCount := failures[channelError.ChannelId]
-
-	entry := buildObserveLogEntry(c, channelError, apiErr)
-	entry.EventType = model.SchedulerEventFailure
-	entry.AttemptCount = attemptCount
-	entry.Metadata = common.MapToJsonStr(map[string]interface{}{"observation": true})
-	model.RecordChannelSchedulerLog(entry)
-
-	threshold := s.ChannelFailureThreshold
-	channel, err := model.CacheGetChannel(channelError.ChannelId)
-	if err == nil && channel != nil {
-		threshold = channel.ResolveSchedulerRetryTimes(s.ChannelFailureThreshold)
-	}
-	if attemptCount == threshold {
-		observeEntry := buildObserveLogEntry(c, channelError, apiErr)
-		observeEntry.EventType = model.SchedulerEventObserveDisable
-		observeEntry.AttemptCount = attemptCount
-		observeEntry.DisableDurationSeconds = s.AutoDisableSeconds
-		if channel != nil {
-			observeEntry.DisableDurationSeconds = channel.ResolveSchedulerAutoDisableSeconds(s.AutoDisableSeconds)
-		}
-		observeEntry.Metadata = common.MapToJsonStr(map[string]interface{}{
-			"observation": true,
-			"skip_reason": "observation mode, no action taken",
-		})
-		model.RecordChannelSchedulerLog(observeEntry)
-	}
-}
-
-func buildObserveLogEntry(c *gin.Context, channelError types.ChannelError, apiErr *types.NewAPIError) *model.ChannelSchedulerLog {
-	entry := &model.ChannelSchedulerLog{
-		RequestId:   c.GetString(common.RequestIdKey),
-		UserId:      c.GetInt("id"),
-		Username:    c.GetString("username"),
-		TokenId:     c.GetInt("token_id"),
-		TokenName:   c.GetString("token_name"),
-		Group:       c.GetString("group"),
-		ModelName:   c.GetString("original_model"),
-		ChannelId:   channelError.ChannelId,
-		ChannelName: channelError.ChannelName,
-		ChannelType: channelError.ChannelType,
-	}
-	if channel, err := model.CacheGetChannel(channelError.ChannelId); err == nil && channel != nil {
-		entry.Priority = channel.GetPriority()
-	}
-	if apiErr != nil {
-		entry.StatusCode = apiErr.StatusCode
-		entry.ErrorCode = string(apiErr.GetErrorCode())
-		entry.ErrorType = string(apiErr.GetErrorType())
-		entry.Reason = apiErr.MaskSensitiveError()
-	}
-	if usedChannels := c.GetStringSlice("use_channel"); len(usedChannels) > 0 {
-		if data, err := common.Marshal(usedChannels); err == nil {
-			entry.UsedChannels = string(data)
-		}
-	}
-	return entry
 }
 
 // pickWeightedChannel 在同优先级候选内按权重随机选择一个渠道。

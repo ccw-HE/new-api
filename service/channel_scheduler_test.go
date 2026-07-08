@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -29,6 +30,17 @@ func schedulerCleanup(t *testing.T) {
 		model.DB.Exec("DELETE FROM abilities")
 		model.DB.Exec("DELETE FROM channel_scheduler_logs")
 	})
+}
+
+func TestSchedulerRetryJitterDisabled(t *testing.T) {
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.RetryJitterMinMilliseconds = 0
+		s.RetryJitterMaxMilliseconds = 0
+	})
+
+	minDelay, maxDelay := operation_setting.GetChannelSchedulerSetting().RetryJitterRange()
+	assert.Zero(t, minDelay)
+	assert.Zero(t, maxDelay)
 }
 
 // withSchedulerSetting 修改全局调度器配置并在测试结束后还原。
@@ -182,7 +194,6 @@ func TestSchedulerSessionFailoverSequence(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.Enabled = true
-		s.ObservationOnly = false
 		s.ChannelFailureThreshold = 3
 		s.AutoDisableSeconds = 7200
 		s.MaxAttemptsPerRequest = 50
@@ -634,31 +645,28 @@ func TestTempDisableDoesNotOverrideManualDisable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 模式判定与观察模式
+// 模式判定
 // ---------------------------------------------------------------------------
 
 func TestShouldUseChannelScheduler(t *testing.T) {
 	tests := []struct {
 		name              string
 		enabled           bool
-		observationOnly   bool
 		enableForStream   bool
 		isStream          bool
 		specificChannelId bool
 		expected          bool
 	}{
-		{name: "disabled", enabled: false, observationOnly: false, expected: false},
-		{name: "observation_only", enabled: true, observationOnly: true, expected: false},
-		{name: "driving", enabled: true, observationOnly: false, expected: true},
-		{name: "stream_not_enabled", enabled: true, observationOnly: false, isStream: true, expected: false},
-		{name: "stream_enabled", enabled: true, observationOnly: false, isStream: true, enableForStream: true, expected: true},
-		{name: "specific_channel", enabled: true, observationOnly: false, specificChannelId: true, expected: false},
+		{name: "disabled", enabled: false, expected: false},
+		{name: "driving", enabled: true, expected: true},
+		{name: "stream_not_enabled", enabled: true, isStream: true, expected: false},
+		{name: "stream_enabled", enabled: true, isStream: true, enableForStream: true, expected: true},
+		{name: "specific_channel", enabled: true, specificChannelId: true, expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 				s.Enabled = tt.enabled
-				s.ObservationOnly = tt.observationOnly
 				s.EnableForStream = tt.enableForStream
 			})
 			c := newSchedulerTestContext(t)
@@ -670,31 +678,19 @@ func TestShouldUseChannelScheduler(t *testing.T) {
 	}
 }
 
-func TestObserveChannelFailureForScheduler(t *testing.T) {
-	schedulerCleanup(t)
+func TestSchedulerRetryJitterRange(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
-		s.Enabled = false
-		s.ObservationOnly = true
-		s.LogEnabled = true
-		s.ChannelFailureThreshold = 3
+		s.RetryJitterMinMilliseconds = 3000
+		s.RetryJitterMaxMilliseconds = 7000
 	})
-	chA := seedSchedulerChannel(t, seedChannelOptions{id: 331, name: "A", priority: 3, autoBan: 1})
 
-	c := newSchedulerTestContext(t)
-	channelError := types.ChannelError{ChannelId: chA.Id, ChannelType: chA.Type, ChannelName: chA.Name, AutoBan: true}
-	for i := 0; i < 3; i++ {
-		ObserveChannelFailureForScheduler(c, channelError, mockUpstreamError())
+	minDelay, maxDelay := operation_setting.GetChannelSchedulerSetting().RetryJitterRange()
+	assert.Equal(t, 3*time.Second, minDelay)
+	assert.Equal(t, 7*time.Second, maxDelay)
+
+	for i := 0; i < 20; i++ {
+		delay := randomSchedulerRetryJitter(minDelay, maxDelay)
+		assert.GreaterOrEqual(t, delay, minDelay)
+		assert.LessOrEqual(t, delay, maxDelay)
 	}
-
-	// 观察模式：3 条 failure + 达到阈值时 1 条 observe_disable，但不真正禁用
-	assert.EqualValues(t, 3, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
-	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
-	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chA.Id).Status)
-
-	// 观察模式关闭时不写日志
-	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
-		s.ObservationOnly = false
-	})
-	ObserveChannelFailureForScheduler(c, channelError, mockUpstreamError())
-	assert.EqualValues(t, 3, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
 }

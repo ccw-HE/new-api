@@ -13,16 +13,18 @@ import (
 )
 
 const (
-	schedulerConfigPrefix        = "channel_scheduler_setting."
-	maxSchedulerRetryTimes       = 1000
-	maxSchedulerDisableSeconds   = 30 * 24 * 3600
-	maxSchedulerAttemptsPerReq   = 100
-	minSchedulerDisableSeconds   = 1
-	minSchedulerRetryTimes       = 1
-	minSchedulerAttemptsPerReq   = 1
-	schedulerRestoreAuditAction  = "channel.scheduler_restore"
-	schedulerChannelCfgAuditKey  = "channel.scheduler_config"
-	schedulerGlobalCfgAuditKey   = "scheduler.config_update"
+	schedulerConfigPrefix       = "channel_scheduler_setting."
+	maxSchedulerRetryTimes      = 1000
+	maxSchedulerDisableSeconds  = 30 * 24 * 3600
+	maxSchedulerAttemptsPerReq  = 100
+	maxSchedulerRetryJitterMs   = 10000
+	minSchedulerDisableSeconds  = 1
+	minSchedulerRetryTimes      = 1
+	minSchedulerAttemptsPerReq  = 1
+	minSchedulerRetryJitterMs   = 100
+	schedulerRestoreAuditAction = "channel.scheduler_restore"
+	schedulerChannelCfgAuditKey = "channel.scheduler_config"
+	schedulerGlobalCfgAuditKey  = "scheduler.config_update"
 )
 
 // GetChannelSchedulerConfig 查看全局调度器配置（Root）。
@@ -49,6 +51,10 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 		common.ApiErrorMsg(c, "单请求最大尝试次数必须在 1-100 之间")
 		return
 	}
+	if !validSchedulerRetryJitter(setting.RetryJitterMinMilliseconds, setting.RetryJitterMaxMilliseconds) {
+		common.ApiErrorMsg(c, "重试随机抖动必须为 0/0 关闭，或在 0.1-10 秒之间且最小值不大于最大值")
+		return
+	}
 	configMap, err := config.ConfigToMap(&setting)
 	if err != nil {
 		common.ApiError(c, err)
@@ -63,10 +69,20 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 		return
 	}
 	recordManageAudit(c, schedulerGlobalCfgAuditKey, map[string]interface{}{
-		"enabled":          setting.Enabled,
-		"observation_only": setting.ObservationOnly,
+		"enabled":             setting.Enabled,
+		"retry_jitter_min_ms": setting.RetryJitterMinMilliseconds,
+		"retry_jitter_max_ms": setting.RetryJitterMaxMilliseconds,
 	})
 	common.ApiSuccess(c, operation_setting.GetChannelSchedulerSetting())
+}
+
+func validSchedulerRetryJitter(minMillis int, maxMillis int) bool {
+	if minMillis == 0 && maxMillis == 0 {
+		return true
+	}
+	return minMillis >= minSchedulerRetryJitterMs &&
+		maxMillis <= maxSchedulerRetryJitterMs &&
+		minMillis <= maxMillis
 }
 
 // GetSchedulerDisabledChannels 当前处于调度器临时禁用状态的渠道列表（Admin）。

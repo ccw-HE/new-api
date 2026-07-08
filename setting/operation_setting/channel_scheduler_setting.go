@@ -1,6 +1,8 @@
 package operation_setting
 
 import (
+	"time"
+
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -9,40 +11,41 @@ import (
 // 高级调度器在同一优先级内让单个渠道连续重试到阈值，达到阈值后临时禁用该渠道，
 // 换同优先级其他渠道，同级耗尽后才降级到下一优先级。
 //
-// Enabled=false 时完全走旧调度逻辑；ObservationOnly=true 时只记录调度日志，
-// 不改变任何调度行为。两者均为线上灰度安全开关。
+// Enabled=false 时完全走旧调度逻辑。
 type ChannelSchedulerSetting struct {
-	Enabled                 bool `json:"enabled"`
-	ObservationOnly         bool `json:"observation_only"`
-	ChannelFailureThreshold int  `json:"channel_failure_threshold"`
-	AutoDisableSeconds      int  `json:"auto_disable_seconds"`
-	AllowPriorityFallback   bool `json:"allow_priority_fallback"`
-	LogEnabled              bool `json:"log_enabled"`
-	RespectAutoBan          bool `json:"respect_auto_ban"`
-	RetrySameChannel        bool `json:"retry_same_channel"`
-	MaxAttemptsPerRequest   int  `json:"max_attempts_per_request"`
-	EnableForStream         bool `json:"enable_for_stream"`
-	EnableForTaskRelay      bool `json:"enable_for_task_relay"`
+	Enabled                    bool `json:"enabled"`
+	ChannelFailureThreshold    int  `json:"channel_failure_threshold"`
+	AutoDisableSeconds         int  `json:"auto_disable_seconds"`
+	RetryJitterMinMilliseconds int  `json:"retry_jitter_min_ms"`
+	RetryJitterMaxMilliseconds int  `json:"retry_jitter_max_ms"`
+	AllowPriorityFallback      bool `json:"allow_priority_fallback"`
+	LogEnabled                 bool `json:"log_enabled"`
+	RespectAutoBan             bool `json:"respect_auto_ban"`
+	RetrySameChannel           bool `json:"retry_same_channel"`
+	MaxAttemptsPerRequest      int  `json:"max_attempts_per_request"`
+	EnableForStream            bool `json:"enable_for_stream"`
 }
 
 const (
 	defaultSchedulerFailureThreshold = 3
 	defaultSchedulerDisableSeconds   = 7200
 	defaultSchedulerMaxAttempts      = 12
+	minSchedulerRetryJitterMillis    = 100
+	maxSchedulerRetryJitterMillis    = 10000
 )
 
 var channelSchedulerSetting = ChannelSchedulerSetting{
-	Enabled:                 false,
-	ObservationOnly:         true,
-	ChannelFailureThreshold: defaultSchedulerFailureThreshold,
-	AutoDisableSeconds:      defaultSchedulerDisableSeconds,
-	AllowPriorityFallback:   true,
-	LogEnabled:              true,
-	RespectAutoBan:          true,
-	RetrySameChannel:        true,
-	MaxAttemptsPerRequest:   defaultSchedulerMaxAttempts,
-	EnableForStream:         false,
-	EnableForTaskRelay:      false,
+	Enabled:                    false,
+	ChannelFailureThreshold:    defaultSchedulerFailureThreshold,
+	AutoDisableSeconds:         defaultSchedulerDisableSeconds,
+	RetryJitterMinMilliseconds: 0,
+	RetryJitterMaxMilliseconds: 0,
+	AllowPriorityFallback:      true,
+	LogEnabled:                 true,
+	RespectAutoBan:             true,
+	RetrySameChannel:           true,
+	MaxAttemptsPerRequest:      defaultSchedulerMaxAttempts,
+	EnableForStream:            false,
 }
 
 func init() {
@@ -62,4 +65,19 @@ func GetChannelSchedulerSetting() *ChannelSchedulerSetting {
 		channelSchedulerSetting.MaxAttemptsPerRequest = defaultSchedulerMaxAttempts
 	}
 	return &channelSchedulerSetting
+}
+
+func (s *ChannelSchedulerSetting) RetryJitterRange() (time.Duration, time.Duration) {
+	if s == nil {
+		return 0, 0
+	}
+	minMillis := s.RetryJitterMinMilliseconds
+	maxMillis := s.RetryJitterMaxMilliseconds
+	if minMillis == 0 && maxMillis == 0 {
+		return 0, 0
+	}
+	if minMillis < minSchedulerRetryJitterMillis || maxMillis > maxSchedulerRetryJitterMillis || minMillis > maxMillis {
+		return 0, 0
+	}
+	return time.Duration(minMillis) * time.Millisecond, time.Duration(maxMillis) * time.Millisecond
 }
