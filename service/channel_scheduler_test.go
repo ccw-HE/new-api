@@ -397,6 +397,40 @@ func TestSchedulerSessionMaxAttempts(t *testing.T) {
 	assert.Equal(t, 0, session.RemainingAttempts())
 }
 
+func TestSchedulerSessionLowConfiguredMaxAttemptsDoesNotCutOffFailover(t *testing.T) {
+	schedulerCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.ChannelFailureThreshold = 3
+		s.MaxAttemptsPerRequest = 3
+		s.AllowPriorityFallback = true
+		s.RetrySameChannel = true
+	})
+	chA := seedSchedulerChannel(t, seedChannelOptions{id: 256, name: "A", priority: 3, autoBan: 1})
+	chB := seedSchedulerChannel(t, seedChannelOptions{id: 257, name: "B", priority: 3, autoBan: 1})
+	chC := seedSchedulerChannel(t, seedChannelOptions{id: 258, name: "C", priority: 2, autoBan: 1})
+
+	session := newSchedulerSessionForTest(t)
+	channel := session.AdoptInitialChannel(chA.Id)
+	require.NotNil(t, channel)
+
+	var sequence []int
+	for {
+		sequence = append(sequence, channel.Id)
+		session.RecordFailure(channel, mockUpstreamError(), true)
+		next, ok := session.NextChannel()
+		if !ok {
+			break
+		}
+		channel = next
+	}
+
+	assert.Equal(t, []int{
+		chA.Id, chA.Id, chA.Id,
+		chB.Id, chB.Id, chB.Id,
+		chC.Id, chC.Id, chC.Id,
+	}, sequence)
+}
+
 // 渠道级阈值与禁用时长覆盖全局
 func TestSchedulerSessionChannelLevelOverrides(t *testing.T) {
 	schedulerCleanup(t)

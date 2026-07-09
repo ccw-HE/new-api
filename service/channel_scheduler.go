@@ -43,6 +43,8 @@ type schedulerGroupCandidates struct {
 	buckets []*model.ChannelPriorityBucket
 }
 
+const schedulerMaxEffectiveAttemptsPerRequest = 100
+
 // ChannelSchedulerSession 单次请求的调度会话。
 // 非并发安全：一个请求内串行使用。
 type ChannelSchedulerSession struct {
@@ -106,6 +108,54 @@ func NewChannelSchedulerSession(c *gin.Context, tokenGroup string, modelName str
 	return session, nil
 }
 
+func (s *ChannelSchedulerSession) ensureFailoverAttemptBudget(initial *model.Channel) {
+	if initial == nil {
+		return
+	}
+	initialThreshold := initial.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+	if s.setting.MaxAttemptsPerRequest < initialThreshold {
+		return
+	}
+	minAttempts := 0
+	seen := map[int]bool{}
+	addThreshold := func(channel *model.Channel) bool {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled || seen[channel.Id] {
+			return false
+		}
+		seen[channel.Id] = true
+		minAttempts += channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+		if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
+			minAttempts = schedulerMaxEffectiveAttemptsPerRequest
+			return true
+		}
+		return false
+	}
+	if addThreshold(initial) {
+		if minAttempts > s.setting.MaxAttemptsPerRequest {
+			s.setting.MaxAttemptsPerRequest = minAttempts
+		}
+		return
+	}
+	for _, group := range s.groups {
+		for _, bucket := range group.buckets {
+			for _, channel := range bucket.Channels {
+				if addThreshold(channel) {
+					break
+				}
+			}
+			if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
+				break
+			}
+		}
+		if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
+			break
+		}
+	}
+	if minAttempts > s.setting.MaxAttemptsPerRequest {
+		s.setting.MaxAttemptsPerRequest = minAttempts
+	}
+}
+
 // AdoptInitialChannel 把 middleware.Distribute 已选好的首个渠道纳入会话，
 // 并把会话游标对齐到该渠道所在的分组与优先级桶。
 func (s *ChannelSchedulerSession) AdoptInitialChannel(channelId int) *model.Channel {
@@ -129,6 +179,7 @@ func (s *ChannelSchedulerSession) AdoptInitialChannel(channelId int) *model.Chan
 				if candidate.Id == channelId {
 					s.groupIdx = gi
 					s.bucketIdx = bi
+					s.ensureFailoverAttemptBudget(channel)
 					return channel
 				}
 			}
@@ -137,6 +188,7 @@ func (s *ChannelSchedulerSession) AdoptInitialChannel(channelId int) *model.Chan
 	// 首选渠道不在候选集中（缓存刚刷新、affinity 指定等），从头开始遍历。
 	s.groupIdx = 0
 	s.bucketIdx = 0
+	s.ensureFailoverAttemptBudget(channel)
 	return channel
 }
 
