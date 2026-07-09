@@ -344,6 +344,32 @@ func TestSchedulerSessionNonRetryableFailure(t *testing.T) {
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
 }
 
+func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) {
+	schedulerCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.ChannelFailureThreshold = 1
+		s.MaxAttemptsPerRequest = 12
+	})
+	chA := seedSchedulerChannel(t, seedChannelOptions{id: 245, name: "A", priority: 3, autoBan: 1})
+	chB := seedSchedulerChannel(t, seedChannelOptions{id: 246, name: "B", priority: 3, autoBan: 1})
+
+	session := newSchedulerSessionForTest(t)
+	channel := session.AdoptInitialChannel(chA.Id)
+	require.NotNil(t, channel)
+	err := types.NewErrorWithStatusCode(errors.New("dial tcp: connection refused"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	session.RecordFailure(channel, err, true)
+
+	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chA.Id).Status)
+	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
+	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
+	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
+
+	next, ok := session.NextChannel()
+	require.True(t, ok)
+	assert.Equal(t, chB.Id, next.Id)
+	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chB.Id).Status)
+}
+
 // 单请求最大尝试次数
 func TestSchedulerSessionMaxAttempts(t *testing.T) {
 	schedulerCleanup(t)
@@ -652,22 +678,19 @@ func TestShouldUseChannelScheduler(t *testing.T) {
 	tests := []struct {
 		name              string
 		enabled           bool
-		enableForStream   bool
 		isStream          bool
 		specificChannelId bool
 		expected          bool
 	}{
 		{name: "disabled", enabled: false, expected: false},
 		{name: "driving", enabled: true, expected: true},
-		{name: "stream_not_enabled", enabled: true, isStream: true, expected: false},
-		{name: "stream_enabled", enabled: true, isStream: true, enableForStream: true, expected: true},
+		{name: "stream_uses_scheduler_when_enabled", enabled: true, isStream: true, expected: true},
 		{name: "specific_channel", enabled: true, specificChannelId: true, expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 				s.Enabled = tt.enabled
-				s.EnableForStream = tt.enableForStream
 			})
 			c := newSchedulerTestContext(t)
 			if tt.specificChannelId {

@@ -4931,8 +4931,6 @@
     "Maximum Delay": "Maximum Delay",
     "Random delay before each scheduler retry. Set both values to 0 to disable.": "Random delay before each scheduler retry. Set both values to 0 to disable.",
     "must be 0/0 or between 0.1 and 10 seconds": "must be 0/0 or between 0.1 and 10 seconds",
-    "Enable for Streaming Requests": "Enable for Streaming Requests",
-    "Not recommended for the first rollout: partially streamed responses cannot be retried safely.": "Not recommended for the first rollout: partially streamed responses cannot be retried safely.",
     "Failure Threshold": "Failure Threshold",
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Consecutive failures before a channel is temporarily disabled (per-channel override available).",
     "Auto Disable Seconds": "Auto Disable Seconds",

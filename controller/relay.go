@@ -331,6 +331,7 @@ func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo,
 			return bodyErr
 		}
 
+		relayInfo.DetectEmptyResponseForScheduler = true
 		newAPIError = dispatchRelay(c, relayInfo, relayFormat)
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -417,6 +418,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
@@ -431,6 +435,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
+	}
+	if openaiErr.GetErrorCode() == types.ErrorCodeEmptyResponse {
+		return true
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {

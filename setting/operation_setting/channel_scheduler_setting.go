@@ -23,7 +23,6 @@ type ChannelSchedulerSetting struct {
 	RespectAutoBan             bool `json:"respect_auto_ban"`
 	RetrySameChannel           bool `json:"retry_same_channel"`
 	MaxAttemptsPerRequest      int  `json:"max_attempts_per_request"`
-	EnableForStream            bool `json:"enable_for_stream"`
 }
 
 const (
@@ -45,7 +44,6 @@ var channelSchedulerSetting = ChannelSchedulerSetting{
 	RespectAutoBan:             true,
 	RetrySameChannel:           true,
 	MaxAttemptsPerRequest:      defaultSchedulerMaxAttempts,
-	EnableForStream:            false,
 }
 
 func init() {

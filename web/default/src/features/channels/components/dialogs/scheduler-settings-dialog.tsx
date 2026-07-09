@@ -291,12 +291,6 @@ const SWITCH_FIELDS: Array<{
     description:
       'Channels with auto-ban off are excluded from this request but never temporarily disabled.',
   },
-  {
-    key: 'enable_for_stream',
-    label: 'Enable for Streaming Requests',
-    description:
-      'Not recommended for the first rollout: partially streamed responses cannot be retried safely.',
-  },
 ]
 
 const NUMBER_FIELDS: Array<{

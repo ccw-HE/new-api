@@ -117,16 +117,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var toolCount int
 	var usage = &dto.Usage{}
 	var lastStreamData string
+	var pendingStreamData []string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
+	detectEmptyResponse := info.DetectEmptyResponseForScheduler && !isAudioModel
+	streamHasDeliverable := !detectEmptyResponse
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
-				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
+			if streamHasDeliverable {
+				if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+					common.SysLog("error handling stream format: " + err.Error())
+					sr.Error(err)
+				}
+			} else {
+				pendingStreamData = append(pendingStreamData, lastStreamData)
 			}
 		}
 		if len(data) > 0 {
@@ -140,8 +147,26 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
 			}
+			if !streamHasDeliverable && (strings.TrimSpace(responseTextBuilder.String()) != "" || toolCount > 0) {
+				streamHasDeliverable = true
+				for _, pendingData := range pendingStreamData {
+					if err := HandleStreamFormat(c, info, pendingData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+						common.SysLog("error handling pending stream format: " + err.Error())
+						sr.Error(err)
+					}
+				}
+				pendingStreamData = nil
+			}
 		}
 	})
+
+	if detectEmptyResponse && strings.TrimSpace(responseTextBuilder.String()) == "" && toolCount == 0 {
+		if c.Writer != nil && c.Writer.Written() {
+			logger.LogError(c, "empty stream response detected after downstream write; cannot retry safely")
+		} else {
+			return nil, service.NewEmptyResponseError("openai_stream", "no content, reasoning, or tool calls")
+		}
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -226,7 +251,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			break
 		}
 	}
-	if !service.HasOpenAITextDeliverable(&simpleResponse) {
+	if info.DetectEmptyResponseForScheduler && !service.HasOpenAITextDeliverable(&simpleResponse) {
 		return nil, service.NewEmptyResponseError("openai", "no content, reasoning, or tool calls")
 	}
 

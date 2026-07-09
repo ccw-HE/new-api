@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
 
@@ -12,6 +13,20 @@ import (
 )
 
 func TestHasOpenAITextDeliverable(t *testing.T) {
+	t.Run("nil response is empty", func(t *testing.T) {
+		assert.False(t, HasOpenAITextDeliverable(nil))
+	})
+
+	t.Run("empty string content and no tools is empty", func(t *testing.T) {
+		resp := &dto.OpenAITextResponse{
+			Choices: []dto.OpenAITextResponseChoice{
+				{Message: dto.Message{Content: ""}},
+			},
+		}
+
+		assert.False(t, HasOpenAITextDeliverable(resp))
+	})
+
 	t.Run("empty content and no tools is empty", func(t *testing.T) {
 		resp := &dto.OpenAITextResponse{
 			Choices: []dto.OpenAITextResponseChoice{
@@ -20,6 +35,21 @@ func TestHasOpenAITextDeliverable(t *testing.T) {
 		}
 
 		assert.False(t, HasOpenAITextDeliverable(resp))
+	})
+
+	t.Run("null content from json and no tools is empty", func(t *testing.T) {
+		var resp dto.OpenAITextResponse
+		require.NoError(t, common.Unmarshal([]byte(`{
+			"choices": [
+				{
+					"message": {
+						"content": null
+					}
+				}
+			]
+		}`), &resp))
+
+		assert.False(t, HasOpenAITextDeliverable(&resp))
 	})
 
 	t.Run("empty tool calls are empty", func(t *testing.T) {

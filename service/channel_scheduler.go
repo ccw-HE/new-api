@@ -27,12 +27,9 @@ import (
 // model.UpdateChannelStatus 的幂等语义与会话本地排除集。
 
 // ShouldUseChannelScheduler 判断当前请求是否由高级调度器接管渠道选择。
-func ShouldUseChannelScheduler(c *gin.Context, isStream bool) bool {
+func ShouldUseChannelScheduler(c *gin.Context, _ bool) bool {
 	s := operation_setting.GetChannelSchedulerSetting()
 	if !s.Enabled {
-		return false
-	}
-	if isStream && !s.EnableForStream {
 		return false
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
@@ -266,6 +263,7 @@ func (s *ChannelSchedulerSession) RecordFailure(channel *model.Channel, apiErr *
 	s.totalAttempts++
 	s.failures[channel.Id]++
 	attemptCount := s.failures[channel.Id]
+	requestFailedWithoutUpstreamResponse := apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed
 
 	if s.setting.LogEnabled {
 		entry := s.buildLogEntry(channel, apiErr)
@@ -279,6 +277,10 @@ func (s *ChannelSchedulerSession) RecordFailure(channel *model.Channel, apiErr *
 	}
 
 	if !retryable {
+		return
+	}
+	if requestFailedWithoutUpstreamResponse {
+		s.ExcludeChannel(channel.Id)
 		return
 	}
 

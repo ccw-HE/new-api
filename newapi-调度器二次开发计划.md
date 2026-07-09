@@ -361,7 +361,7 @@ middleware.Distribute
 | `SchedulerRespectAutoBan` | true | 是否尊重渠道 `auto_ban` |
 | `SchedulerRetrySameChannel` | true | 是否允许同渠道连续重试 |
 | `SchedulerMaxAttemptsPerRequest` | 12 | 单请求最大尝试次数，防止等待时间失控 |
-| `SchedulerEnableForStream` | false | 第一版不建议对流式请求启用 |
+| 流式请求 | 随 `SchedulerEnabled` 生效 | 开启高级调度器后同时覆盖流式和非流式请求 |
 | `SchedulerEnableForTaskRelay` | false | 第一版不建议覆盖任务类 relay |
 
 不要复用 `RetryTimes` 表示“每个渠道重试次数”。可以继续保留 `RetryTimes` 给旧调度器，新调度器使用自己的阈值和总尝试上限。
@@ -456,7 +456,7 @@ return lastErr
 - 禁用时长先使用渠道级 `scheduler_auto_disable_seconds`，渠道未设置时使用全局 `SchedulerAutoDisableSeconds`。
 - 如果 `SchedulerRetrySameChannel=false`，可以变成 A 失败一次后 B，B 失败一次后 A，再按累计阈值禁用。这更像负载均衡，但不是你当前描述的需求。
 - 每个请求必须有总尝试上限，否则高优先级有很多渠道时等待时间会失控。
-- 流式请求第一版不建议启用高级重试，除非能证明错误发生在响应写出前。
+- 流式请求随高级调度器总开关启用；但已向客户端写出不可回滚内容后，仍不得换渠道重试。
 
 ## 14. 数据一致性与并发注意事项
 

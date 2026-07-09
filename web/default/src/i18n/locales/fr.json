@@ -4931,8 +4931,6 @@
     "Maximum Delay": "Délai maximum",
     "Random delay before each scheduler retry. Set both values to 0 to disable.": "Délai aléatoire avant chaque réessai du planificateur. Définissez les deux valeurs à 0 pour désactiver.",
     "must be 0/0 or between 0.1 and 10 seconds": "doit être 0/0 ou compris entre 0,1 et 10 secondes",
-    "Enable for Streaming Requests": "Activer pour les requêtes en streaming",
-    "Not recommended for the first rollout: partially streamed responses cannot be retried safely.": "Déconseillé au premier déploiement : une réponse partiellement diffusée ne peut pas être réessayée sans risque.",
     "Failure Threshold": "Seuil d'échec",
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Nombre d'échecs consécutifs avant désactivation temporaire (surcharge par canal possible).",
     "Auto Disable Seconds": "Durée de désactivation (secondes)",

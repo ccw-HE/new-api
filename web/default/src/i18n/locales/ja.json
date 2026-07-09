@@ -4931,8 +4931,6 @@
     "Maximum Delay": "最大遅延",
     "Random delay before each scheduler retry. Set both values to 0 to disable.": "スケジューラーの各再試行前にランダムに待機します。両方の値を 0 にすると無効になります。",
     "must be 0/0 or between 0.1 and 10 seconds": "0/0、または 0.1〜10 秒の範囲で指定してください",
-    "Enable for Streaming Requests": "ストリーミングで有効化",
-    "Not recommended for the first rollout: partially streamed responses cannot be retried safely.": "初期導入では非推奨：部分送信済みのストリーム応答は安全にリトライできません。",
     "Failure Threshold": "失敗閾値",
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "一時無効化までの連続失敗回数（チャネル単位で上書き可能）。",
     "Auto Disable Seconds": "無効化秒数",

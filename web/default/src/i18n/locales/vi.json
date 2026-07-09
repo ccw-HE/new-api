@@ -4931,8 +4931,6 @@
     "Maximum Delay": "Độ trễ tối đa",
     "Random delay before each scheduler retry. Set both values to 0 to disable.": "Chờ ngẫu nhiên trước mỗi lần bộ lập lịch thử lại. Đặt cả hai giá trị là 0 để tắt.",
     "must be 0/0 or between 0.1 and 10 seconds": "phải là 0/0 hoặc nằm trong khoảng 0,1 đến 10 giây",
-    "Enable for Streaming Requests": "Bật cho yêu cầu streaming",
-    "Not recommended for the first rollout: partially streamed responses cannot be retried safely.": "Không khuyến nghị ở giai đoạn đầu: phản hồi đã stream một phần không thể thử lại an toàn.",
     "Failure Threshold": "Ngưỡng lỗi",
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Số lần lỗi liên tiếp trước khi kênh bị vô hiệu hóa tạm thời (có thể ghi đè theo kênh).",
     "Auto Disable Seconds": "Số giây vô hiệu hóa",

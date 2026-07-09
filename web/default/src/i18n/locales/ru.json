@@ -4931,8 +4931,6 @@
     "Maximum Delay": "Максимальная задержка",
     "Random delay before each scheduler retry. Set both values to 0 to disable.": "Случайная пауза перед каждой повторной попыткой планировщика. Укажите 0 для обоих значений, чтобы отключить.",
     "must be 0/0 or between 0.1 and 10 seconds": "должно быть 0/0 или в диапазоне от 0,1 до 10 секунд",
-    "Enable for Streaming Requests": "Включить для потоковых запросов",
-    "Not recommended for the first rollout: partially streamed responses cannot be retried safely.": "Не рекомендуется на первом этапе: частично отданный поток нельзя безопасно повторить.",
     "Failure Threshold": "Порог сбоев",
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Сколько сбоев подряд ведут к временному отключению (можно переопределить для канала).",
     "Auto Disable Seconds": "Длительность отключения (сек)",
