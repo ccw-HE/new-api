@@ -117,6 +117,58 @@ func TestOaiStreamHandlerReturnsEmptyResponseBeforeWritingWhenSchedulerDetectsEm
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOaiStreamHandlerWrapsJSONChatResponseWhenStreamRequested(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := `{"id":"chatcmpl-json","object":"chat.completion","created":1710000000,"model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"mock success"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`
+	c, recorder, resp, info := newOAIStreamTestContext(t, body)
+	resp.Header.Set("Content-Type", "application/json; charset=utf-8")
+	info.DetectEmptyResponseForScheduler = true
+
+	usage, err := OaiStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 3, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"content":"mock success"`)
+	require.Contains(t, recorder.Body.String(), `data: [DONE]`)
+}
+
+func TestOaiStreamHandlerKeepsSSEWhenContentTypeMissing(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-sse","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant","content":"native stream"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-sse","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	c, recorder, resp, info := newOAIStreamTestContext(t, body)
+	resp.Header.Del("Content-Type")
+	info.DetectEmptyResponseForScheduler = true
+
+	usage, err := OaiStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), `"content":"native stream"`)
+	require.Contains(t, recorder.Body.String(), `data: [DONE]`)
+}
+
 func TestOpenaiHandlerKeepsNativeEmptyResponseSuccessfulByDefault(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
