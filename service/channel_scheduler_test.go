@@ -32,6 +32,19 @@ func schedulerCleanup(t *testing.T) {
 	})
 }
 
+func schedulerLogRetentionCleanup(t *testing.T) {
+	t.Helper()
+	cleanup := func() {
+		model.DB.Exec("DELETE FROM channel_scheduler_logs")
+		model.DB.Exec("DELETE FROM options")
+		common.OptionMapRWMutex.Lock()
+		delete(common.OptionMap, schedulerLogRetentionLastRunDateOptionKey)
+		common.OptionMapRWMutex.Unlock()
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+}
+
 func TestSchedulerRetryJitterDisabled(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.RetryJitterMinMilliseconds = 0
@@ -655,6 +668,104 @@ func TestRecoverExpiredSchedulerChannels(t *testing.T) {
 	require.NoError(t, ManualRestoreSchedulerChannel(noRecover.Id, 1, "root"))
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, noRecover.Id).Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventManualRestore, noRecover.Id))
+}
+
+func TestRunSchedulerLogRetentionOnceKeepsNewestLogsAfterDateChange(t *testing.T) {
+	schedulerLogRetentionCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.SchedulerLogRetentionEnabled = true
+		s.SchedulerLogRetentionCount = 2
+	})
+	referenceTime := time.Date(2026, 7, 9, 9, 0, 0, 0, time.Local)
+	require.NoError(t, model.UpdateOption(schedulerLogRetentionLastRunDateOptionKey, "2026-07-08"))
+
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+			CreatedAt: int64(100 + i),
+			EventType: model.SchedulerEventFailure,
+			ChannelId: i,
+		}).Error)
+	}
+
+	deleted, ran, err := RunSchedulerLogRetentionOnce(referenceTime)
+	require.NoError(t, err)
+	assert.True(t, ran)
+	assert.EqualValues(t, 3, deleted)
+
+	var remaining []model.ChannelSchedulerLog
+	require.NoError(t, model.DB.Order("created_at asc, id asc").Find(&remaining).Error)
+	require.Len(t, remaining, 2)
+	assert.Equal(t, 4, remaining[0].ChannelId)
+	assert.Equal(t, 5, remaining[1].ChannelId)
+	assert.Equal(t, "2026-07-09", schedulerLogRetentionLastRunDate())
+
+	require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+		CreatedAt: 106,
+		EventType: model.SchedulerEventFailure,
+		ChannelId: 6,
+	}).Error)
+	deleted, ran, err = RunSchedulerLogRetentionOnce(referenceTime.Add(2 * time.Hour))
+	require.NoError(t, err)
+	assert.False(t, ran)
+	assert.EqualValues(t, 0, deleted)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelSchedulerLog{}).Count(&count).Error)
+	assert.EqualValues(t, 3, count)
+}
+
+func TestRunSchedulerLogRetentionOnceInitializesBaselineWithoutDeleting(t *testing.T) {
+	schedulerLogRetentionCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.SchedulerLogRetentionEnabled = true
+		s.SchedulerLogRetentionCount = 1
+	})
+	referenceTime := time.Date(2026, 7, 9, 9, 0, 0, 0, time.Local)
+
+	for i := 1; i <= 3; i++ {
+		require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+			CreatedAt: int64(100 + i),
+			EventType: model.SchedulerEventFailure,
+			ChannelId: i,
+		}).Error)
+	}
+
+	deleted, ran, err := RunSchedulerLogRetentionOnce(referenceTime)
+	require.NoError(t, err)
+	assert.False(t, ran)
+	assert.EqualValues(t, 0, deleted)
+	assert.Equal(t, "2026-07-09", schedulerLogRetentionLastRunDate())
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelSchedulerLog{}).Count(&count).Error)
+	assert.EqualValues(t, 3, count)
+}
+
+func TestRunSchedulerLogRetentionOnceDisabledDoesNotClean(t *testing.T) {
+	schedulerLogRetentionCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.SchedulerLogRetentionEnabled = false
+		s.SchedulerLogRetentionCount = 1
+	})
+	require.NoError(t, model.UpdateOption(schedulerLogRetentionLastRunDateOptionKey, "2026-07-08"))
+
+	for i := 1; i <= 3; i++ {
+		require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+			CreatedAt: int64(100 + i),
+			EventType: model.SchedulerEventFailure,
+			ChannelId: i,
+		}).Error)
+	}
+
+	deleted, ran, err := RunSchedulerLogRetentionOnce(time.Date(2026, 7, 9, 9, 0, 0, 0, time.Local))
+	require.NoError(t, err)
+	assert.False(t, ran)
+	assert.EqualValues(t, 0, deleted)
+	assert.Equal(t, "2026-07-08", schedulerLogRetentionLastRunDate())
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelSchedulerLog{}).Count(&count).Error)
+	assert.EqualValues(t, 3, count)
 }
 
 func TestManualRestoreRules(t *testing.T) {

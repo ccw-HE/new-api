@@ -113,16 +113,33 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 
 func TestSchedulerRecoverHandlerEnabledRequiresRecoverableChannel(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Option{}))
 
 	setting := operation_setting.GetChannelSchedulerSetting()
 	saved := *setting
 	setting.Enabled = true
+	setting.SchedulerLogRetentionEnabled = false
 	t.Cleanup(func() {
 		*operation_setting.GetChannelSchedulerSetting() = saved
 	})
 
 	require.False(t, schedulerRecoverHandler{}.Enabled())
+}
+
+func TestSchedulerRecoverHandlerEnabledWhenSchedulerLogRetentionDue(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Option{}))
+
+	setting := operation_setting.GetChannelSchedulerSetting()
+	saved := *setting
+	setting.SchedulerLogRetentionEnabled = true
+	setting.SchedulerLogRetentionCount = 100
+	t.Cleanup(func() {
+		*operation_setting.GetChannelSchedulerSetting() = saved
+	})
+	require.NoError(t, model.UpdateOption("channel_scheduler_log_retention.last_run_date", "2000-01-01"))
+
+	require.True(t, schedulerRecoverHandler{}.Enabled())
 }
 
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {

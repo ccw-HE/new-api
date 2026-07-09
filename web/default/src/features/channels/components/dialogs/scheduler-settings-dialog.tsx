@@ -325,9 +325,13 @@ const NUMBER_FIELDS: Array<{
     description:
       'Hard cap of upstream attempts within one request to bound total latency.',
     min: 1,
-    max: 100,
+    max: 10000,
   },
 ]
+
+const SCHEDULER_LOG_RETENTION_MIN = 1
+const SCHEDULER_LOG_RETENTION_MAX = 1000
+const SCHEDULER_LOG_RETENTION_DEFAULT = 100
 
 const JITTER_MIN_SECONDS = 0.1
 const JITTER_MAX_SECONDS = 10
@@ -358,11 +362,20 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
         ...data.data,
         retry_jitter_min_ms: data.data.retry_jitter_min_ms ?? 0,
         retry_jitter_max_ms: data.data.retry_jitter_max_ms ?? 0,
+        scheduler_log_retention_enabled:
+          data.data.scheduler_log_retention_enabled ?? false,
+        scheduler_log_retention_count:
+          data.data.scheduler_log_retention_count ??
+          SCHEDULER_LOG_RETENTION_DEFAULT,
       })
       setNumberDrafts({
         channel_failure_threshold: String(data.data.channel_failure_threshold),
         auto_disable_seconds: String(data.data.auto_disable_seconds),
         max_attempts_per_request: String(data.data.max_attempts_per_request),
+        scheduler_log_retention_count: String(
+          data.data.scheduler_log_retention_count ??
+            SCHEDULER_LOG_RETENTION_DEFAULT
+        ),
       })
     }
   }, [data])
@@ -398,6 +411,24 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
       }
       parsed[field.key] = value
     }
+    let schedulerLogRetentionCount =
+      config.scheduler_log_retention_count || SCHEDULER_LOG_RETENTION_DEFAULT
+    if (config.scheduler_log_retention_enabled) {
+      const raw = (numberDrafts.scheduler_log_retention_count ?? '').trim()
+      const value = Number(raw)
+      if (
+        raw === '' ||
+        Number.isNaN(value) ||
+        value < SCHEDULER_LOG_RETENTION_MIN ||
+        value > SCHEDULER_LOG_RETENTION_MAX
+      ) {
+        toast.error(
+          `${t('Scheduler Log Retention Count')}: ${t('must be a number between')} ${SCHEDULER_LOG_RETENTION_MIN} - ${SCHEDULER_LOG_RETENTION_MAX}`
+        )
+        return
+      }
+      schedulerLogRetentionCount = value
+    }
     const jitterMinMs = config.retry_jitter_min_ms
     const jitterMaxMs = config.retry_jitter_max_ms
     const jitterDisabled = jitterMinMs === 0 && jitterMaxMs === 0
@@ -417,6 +448,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
       channel_failure_threshold: parsed.channel_failure_threshold,
       auto_disable_seconds: parsed.auto_disable_seconds,
       max_attempts_per_request: parsed.max_attempts_per_request,
+      scheduler_log_retention_count: schedulerLogRetentionCount,
     })
   }
 
@@ -534,6 +566,62 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
             </p>
           </div>
         ))}
+        <div className='space-y-3'>
+          <div className='flex items-start justify-between gap-4'>
+            <div className='min-w-0 space-y-0.5'>
+              <Label className='text-sm'>{t('Scheduler Log Retention')}</Label>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.'
+                )}
+              </p>
+            </div>
+            <Switch
+              checked={config.scheduler_log_retention_enabled}
+              onCheckedChange={(checked) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        scheduler_log_retention_enabled: checked,
+                        scheduler_log_retention_count:
+                          prev.scheduler_log_retention_count ||
+                          SCHEDULER_LOG_RETENTION_DEFAULT,
+                      }
+                    : prev
+                )
+              }
+            />
+          </div>
+          {config.scheduler_log_retention_enabled && (
+            <div className='space-y-1'>
+              <Label
+                className='text-sm'
+                htmlFor='scheduler-log-retention-count'
+              >
+                {t('Scheduler Log Retention Count')}
+              </Label>
+              <Input
+                id='scheduler-log-retention-count'
+                type='number'
+                min={SCHEDULER_LOG_RETENTION_MIN}
+                max={SCHEDULER_LOG_RETENTION_MAX}
+                value={numberDrafts.scheduler_log_retention_count ?? ''}
+                onChange={(e) =>
+                  setNumberDrafts((prev) => ({
+                    ...prev,
+                    scheduler_log_retention_count: e.target.value,
+                  }))
+                }
+              />
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.'
+                )}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
       <div className='flex justify-end'>
         <Button onClick={handleSave} disabled={saveMutation.isPending}>

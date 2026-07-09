@@ -43,7 +43,11 @@ type schedulerGroupCandidates struct {
 	buckets []*model.ChannelPriorityBucket
 }
 
-const schedulerMaxEffectiveAttemptsPerRequest = 100
+const (
+	schedulerMaxEffectiveAttemptsPerRequest   = 10000
+	schedulerLogRetentionLastRunDateOptionKey = "channel_scheduler_log_retention.last_run_date"
+	schedulerLogRetentionDateLayout           = "2006-01-02"
+)
 
 // ChannelSchedulerSession 单次请求的调度会话。
 // 非并发安全：一个请求内串行使用。
@@ -477,6 +481,72 @@ func RecoverExpiredSchedulerChannels() (int, error) {
 		model.InitChannelCache()
 	}
 	return recovered, nil
+}
+
+func schedulerLogRetentionDate(now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.In(time.Local).Format(schedulerLogRetentionDateLayout)
+}
+
+func schedulerLogRetentionLastRunDate() string {
+	common.OptionMapRWMutex.RLock()
+	if common.OptionMap != nil {
+		value := strings.TrimSpace(common.OptionMap[schedulerLogRetentionLastRunDateOptionKey])
+		common.OptionMapRWMutex.RUnlock()
+		if value != "" {
+			return value
+		}
+	} else {
+		common.OptionMapRWMutex.RUnlock()
+	}
+	if model.DB == nil {
+		return ""
+	}
+	option := model.Option{}
+	if err := model.DB.Where("key = ?", schedulerLogRetentionLastRunDateOptionKey).First(&option).Error; err != nil {
+		return ""
+	}
+	return strings.TrimSpace(option.Value)
+}
+
+// ShouldRunSchedulerLogRetention reports whether the shared scheduler maintenance task should run.
+func ShouldRunSchedulerLogRetention() bool {
+	setting := operation_setting.GetChannelSchedulerSetting()
+	if !setting.SchedulerLogRetentionEnabled {
+		return false
+	}
+	return schedulerLogRetentionLastRunDate() != schedulerLogRetentionDate(time.Now())
+}
+
+// ResetSchedulerLogRetentionBaseline starts the next retention window from the given local date.
+func ResetSchedulerLogRetentionBaseline(now time.Time) error {
+	return model.UpdateOption(schedulerLogRetentionLastRunDateOptionKey, schedulerLogRetentionDate(now))
+}
+
+// RunSchedulerLogRetentionOnce keeps the newest configured scheduler log rows after a local date change.
+func RunSchedulerLogRetentionOnce(now time.Time) (int64, bool, error) {
+	setting := operation_setting.GetChannelSchedulerSetting()
+	if !setting.SchedulerLogRetentionEnabled {
+		return 0, false, nil
+	}
+	today := schedulerLogRetentionDate(now)
+	lastRunDate := schedulerLogRetentionLastRunDate()
+	if lastRunDate == today {
+		return 0, false, nil
+	}
+	if lastRunDate == "" {
+		return 0, false, model.UpdateOption(schedulerLogRetentionLastRunDateOptionKey, today)
+	}
+	deleted, err := model.DeleteChannelSchedulerLogsByRetention(setting.SchedulerLogRetentionCount)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := model.UpdateOption(schedulerLogRetentionLastRunDateOptionKey, today); err != nil {
+		return deleted, false, err
+	}
+	return deleted, true, nil
 }
 
 // ManualRestoreSchedulerChannel 管理员手动恢复调度器临时禁用的渠道。

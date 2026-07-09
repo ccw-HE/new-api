@@ -35,6 +35,7 @@ func TestMain(m *testing.M) {
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
+	common.OptionMap = make(map[string]string)
 
 	if err := db.AutoMigrate(
 		&model.Task{},
@@ -44,6 +45,7 @@ func TestMain(m *testing.M) {
 		&model.Channel{},
 		&model.Ability{},
 		&model.ChannelSchedulerLog{},
+		&model.Option{},
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
@@ -67,6 +69,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
+		model.DB.Exec("DELETE FROM channel_scheduler_logs")
+		model.DB.Exec("DELETE FROM options")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM system_task_locks")

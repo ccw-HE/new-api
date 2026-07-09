@@ -207,3 +207,24 @@ func DeleteChannelSchedulerLogs(targetTimestamp int64) (int64, error) {
 	result := DB.Where("created_at < ?", targetTimestamp).Delete(&ChannelSchedulerLog{})
 	return result.RowsAffected, result.Error
 }
+
+// DeleteChannelSchedulerLogsByRetention keeps the newest keep rows and deletes older scheduler logs.
+func DeleteChannelSchedulerLogsByRetention(keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	var total int64
+	if err := DB.Model(&ChannelSchedulerLog{}).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	if total <= int64(keep) {
+		return 0, nil
+	}
+
+	boundary := ChannelSchedulerLog{}
+	if err := DB.Order("created_at desc, id desc").Offset(keep - 1).Limit(1).First(&boundary).Error; err != nil {
+		return 0, err
+	}
+	result := DB.Where("created_at < ? OR (created_at = ? AND id < ?)", boundary.CreatedAt, boundary.CreatedAt, boundary.Id).Delete(&ChannelSchedulerLog{})
+	return result.RowsAffected, result.Error
+}

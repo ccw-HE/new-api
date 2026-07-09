@@ -13,37 +13,43 @@ import (
 //
 // Enabled=false 时完全走旧调度逻辑。
 type ChannelSchedulerSetting struct {
-	Enabled                    bool `json:"enabled"`
-	ChannelFailureThreshold    int  `json:"channel_failure_threshold"`
-	AutoDisableSeconds         int  `json:"auto_disable_seconds"`
-	RetryJitterMinMilliseconds int  `json:"retry_jitter_min_ms"`
-	RetryJitterMaxMilliseconds int  `json:"retry_jitter_max_ms"`
-	AllowPriorityFallback      bool `json:"allow_priority_fallback"`
-	LogEnabled                 bool `json:"log_enabled"`
-	RespectAutoBan             bool `json:"respect_auto_ban"`
-	RetrySameChannel           bool `json:"retry_same_channel"`
-	MaxAttemptsPerRequest      int  `json:"max_attempts_per_request"`
+	Enabled                      bool `json:"enabled"`
+	ChannelFailureThreshold      int  `json:"channel_failure_threshold"`
+	AutoDisableSeconds           int  `json:"auto_disable_seconds"`
+	RetryJitterMinMilliseconds   int  `json:"retry_jitter_min_ms"`
+	RetryJitterMaxMilliseconds   int  `json:"retry_jitter_max_ms"`
+	AllowPriorityFallback        bool `json:"allow_priority_fallback"`
+	LogEnabled                   bool `json:"log_enabled"`
+	RespectAutoBan               bool `json:"respect_auto_ban"`
+	RetrySameChannel             bool `json:"retry_same_channel"`
+	MaxAttemptsPerRequest        int  `json:"max_attempts_per_request"`
+	SchedulerLogRetentionEnabled bool `json:"scheduler_log_retention_enabled"`
+	SchedulerLogRetentionCount   int  `json:"scheduler_log_retention_count"`
 }
 
 const (
-	defaultSchedulerFailureThreshold = 3
-	defaultSchedulerDisableSeconds   = 7200
-	defaultSchedulerMaxAttempts      = 12
-	minSchedulerRetryJitterMillis    = 100
-	maxSchedulerRetryJitterMillis    = 10000
+	defaultSchedulerFailureThreshold  = 3
+	defaultSchedulerDisableSeconds    = 7200
+	defaultSchedulerMaxAttempts       = 12
+	defaultSchedulerLogRetentionCount = 100
+	maxSchedulerLogRetentionCount     = 1000
+	minSchedulerRetryJitterMillis     = 100
+	maxSchedulerRetryJitterMillis     = 10000
 )
 
 var channelSchedulerSetting = ChannelSchedulerSetting{
-	Enabled:                    false,
-	ChannelFailureThreshold:    defaultSchedulerFailureThreshold,
-	AutoDisableSeconds:         defaultSchedulerDisableSeconds,
-	RetryJitterMinMilliseconds: 0,
-	RetryJitterMaxMilliseconds: 0,
-	AllowPriorityFallback:      true,
-	LogEnabled:                 true,
-	RespectAutoBan:             true,
-	RetrySameChannel:           true,
-	MaxAttemptsPerRequest:      defaultSchedulerMaxAttempts,
+	Enabled:                      false,
+	ChannelFailureThreshold:      defaultSchedulerFailureThreshold,
+	AutoDisableSeconds:           defaultSchedulerDisableSeconds,
+	RetryJitterMinMilliseconds:   0,
+	RetryJitterMaxMilliseconds:   0,
+	AllowPriorityFallback:        true,
+	LogEnabled:                   true,
+	RespectAutoBan:               true,
+	RetrySameChannel:             true,
+	MaxAttemptsPerRequest:        defaultSchedulerMaxAttempts,
+	SchedulerLogRetentionEnabled: false,
+	SchedulerLogRetentionCount:   defaultSchedulerLogRetentionCount,
 }
 
 func init() {
@@ -61,6 +67,12 @@ func GetChannelSchedulerSetting() *ChannelSchedulerSetting {
 	}
 	if channelSchedulerSetting.MaxAttemptsPerRequest <= 0 {
 		channelSchedulerSetting.MaxAttemptsPerRequest = defaultSchedulerMaxAttempts
+	}
+	if channelSchedulerSetting.SchedulerLogRetentionCount <= 0 {
+		channelSchedulerSetting.SchedulerLogRetentionCount = defaultSchedulerLogRetentionCount
+	}
+	if channelSchedulerSetting.SchedulerLogRetentionCount > maxSchedulerLogRetentionCount {
+		channelSchedulerSetting.SchedulerLogRetentionCount = maxSchedulerLogRetentionCount
 	}
 	return &channelSchedulerSetting
 }

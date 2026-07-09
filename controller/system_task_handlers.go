@@ -153,15 +153,14 @@ func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, run
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
-// schedulerRecoverHandler 周期恢复到期的调度器临时禁用渠道。
-// Enabled() 只在存在已到期且允许自动恢复的渠道时为真，避免空跑任务刷表；
-// 调度器总开关关闭后，存量可自动恢复渠道仍会按期恢复。
+// schedulerRecoverHandler runs shared scheduler maintenance: expired channel recovery
+// and optional daily scheduler log retention.
 type schedulerRecoverHandler struct{}
 
 func (schedulerRecoverHandler) Type() string { return model.SystemTaskTypeSchedulerRecover }
 
 func (schedulerRecoverHandler) Enabled() bool {
-	return model.HasSchedulerTempDisabledChannels()
+	return model.HasSchedulerTempDisabledChannels() || service.ShouldRunSchedulerLogRetention()
 }
 
 func (schedulerRecoverHandler) Interval() time.Duration { return time.Minute }
@@ -174,7 +173,16 @@ func (schedulerRecoverHandler) Run(ctx context.Context, task *model.SystemTask, 
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
-	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, map[string]any{"recovered": recovered}, nil)
+	deletedLogs, retentionRan, err := service.RunSchedulerLogRetentionOnce(time.Now())
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, map[string]any{
+		"recovered":                       recovered,
+		"scheduler_log_retention_ran":     retentionRan,
+		"scheduler_log_retention_deleted": deletedLogs,
+	}, nil)
 }
 
 func finishSystemTaskHandler(task *model.SystemTask, runnerID string, status model.SystemTaskStatus, result any, runErr error) {
