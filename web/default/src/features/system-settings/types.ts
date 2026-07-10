@@ -72,9 +72,12 @@ export type SystemTask<
   updated_at: number
 }
 
+export type LogCleanupType = 'usage' | 'scheduler'
+
 export type LogCleanupTaskPayload = {
   target_timestamp: number
   batch_size: number
+  log_type?: LogCleanupType
 }
 
 export type LogCleanupTaskState = {
@@ -86,6 +89,7 @@ export type LogCleanupTaskState = {
 
 export type LogCleanupTaskResult = {
   deleted_count: number
+  log_type?: LogCleanupType
 }
 
 export type LogCleanupTask = SystemTask<

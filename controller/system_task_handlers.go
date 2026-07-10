@@ -153,14 +153,13 @@ func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, run
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
-// schedulerRecoverHandler runs shared scheduler maintenance: expired channel recovery
-// and optional daily scheduler log retention.
+// schedulerRecoverHandler runs shared scheduler maintenance for expired channel recovery.
 type schedulerRecoverHandler struct{}
 
 func (schedulerRecoverHandler) Type() string { return model.SystemTaskTypeSchedulerRecover }
 
 func (schedulerRecoverHandler) Enabled() bool {
-	return model.HasSchedulerTempDisabledChannels() || service.ShouldRunSchedulerLogRetention()
+	return model.HasSchedulerTempDisabledChannels()
 }
 
 func (schedulerRecoverHandler) Interval() time.Duration { return time.Minute }
@@ -173,15 +172,8 @@ func (schedulerRecoverHandler) Run(ctx context.Context, task *model.SystemTask, 
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
-	deletedLogs, retentionRan, err := service.RunSchedulerLogRetentionOnce(time.Now())
-	if err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
-		return
-	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, map[string]any{
-		"recovered":                       recovered,
-		"scheduler_log_retention_ran":     retentionRan,
-		"scheduler_log_retention_deleted": deletedLogs,
+		"recovered": recovered,
 	}, nil)
 }
 

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -18,12 +17,10 @@ const (
 	maxSchedulerRetryTimes      = 100
 	maxSchedulerDisableSeconds  = 30 * 24 * 3600
 	maxSchedulerAttemptsPerReq  = 10000
-	maxSchedulerLogRetention    = 1000
 	maxSchedulerRetryJitterMs   = 10000
 	minSchedulerDisableSeconds  = 1
 	minSchedulerRetryTimes      = 1
 	minSchedulerAttemptsPerReq  = 1
-	minSchedulerLogRetention    = 1
 	minSchedulerRetryJitterMs   = 100
 	schedulerRestoreAuditAction = "channel.scheduler_restore"
 	schedulerChannelCfgAuditKey = "channel.scheduler_config"
@@ -54,15 +51,10 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 		common.ApiErrorMsg(c, "单请求最大尝试次数必须在 1-10000 之间")
 		return
 	}
-	if setting.SchedulerLogRetentionEnabled && (setting.SchedulerLogRetentionCount < minSchedulerLogRetention || setting.SchedulerLogRetentionCount > maxSchedulerLogRetention) {
-		common.ApiErrorMsg(c, "调度日志保留数量必须在 1-1000 之间")
-		return
-	}
 	if !validSchedulerRetryJitter(setting.RetryJitterMinMilliseconds, setting.RetryJitterMaxMilliseconds) {
 		common.ApiErrorMsg(c, "重试随机抖动必须为 0/0 关闭，或在 0.1-10 秒之间且最小值不大于最大值")
 		return
 	}
-	previousSetting := *operation_setting.GetChannelSchedulerSetting()
 	configMap, err := config.ConfigToMap(&setting)
 	if err != nil {
 		common.ApiError(c, err)
@@ -75,12 +67,6 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 	if err := model.UpdateOptionsBulk(values); err != nil {
 		common.ApiError(c, err)
 		return
-	}
-	if !previousSetting.SchedulerLogRetentionEnabled && setting.SchedulerLogRetentionEnabled {
-		if err := service.ResetSchedulerLogRetentionBaseline(time.Now()); err != nil {
-			common.ApiError(c, err)
-			return
-		}
 	}
 	recordManageAudit(c, schedulerGlobalCfgAuditKey, map[string]interface{}{
 		"enabled":             setting.Enabled,

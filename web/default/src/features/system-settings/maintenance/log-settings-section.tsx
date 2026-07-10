@@ -74,7 +74,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { LogCleanupTask } from '../types'
+import type { LogCleanupTask, LogCleanupType } from '../types'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
@@ -94,6 +94,14 @@ type ServerLogInfo = {
   oldest_time?: string
   newest_time?: string
 }
+
+const historyLogTypeOptions = [
+  { value: 'usage', label: 'Usage Logs' },
+  { value: 'scheduler', label: 'Scheduler Logs' },
+] as const satisfies ReadonlyArray<{
+  value: LogCleanupType
+  label: string
+}>
 
 const HOURS_IN_DAY = 24
 
@@ -162,6 +170,8 @@ export function LogSettingsSection({
   )
   const [serverLogCleanupMode, setServerLogCleanupMode] = useState('by_count')
   const [serverLogCleanupValue, setServerLogCleanupValue] = useState(10)
+  const [historyLogCleanupType, setHistoryLogCleanupType] =
+    useState<LogCleanupType>('usage')
   const [serverLogCleanupLoading, setServerLogCleanupLoading] = useState(false)
 
   const fetchServerLogInfo = useCallback(async () => {
@@ -220,6 +230,12 @@ export function LogSettingsSection({
   )
   const logCleanupProcessed = logCleanupState?.processed ?? 0
   const logCleanupTotal = logCleanupState?.total ?? 0
+  const historyLogCleanupTypeLabel = useMemo(() => {
+    const option = historyLogTypeOptions.find(
+      (item) => item.value === historyLogCleanupType
+    )
+    return t(option?.label ?? 'Usage Logs')
+  }, [historyLogCleanupType, t])
 
   useEffect(() => {
     if (!logCleanupTask || !isActiveLogCleanupTask(logCleanupTask)) return
@@ -280,7 +296,10 @@ export function LogSettingsSection({
 
     setIsStartingLogCleanup(true)
     try {
-      const res = await startLogCleanupTask(purgeTimestamp)
+      const res = await startLogCleanupTask(
+        purgeTimestamp,
+        historyLogCleanupType
+      )
       if (!res.success) {
         throw new Error(res.message || t('Failed to clean logs'))
       }
@@ -311,8 +330,12 @@ export function LogSettingsSection({
 
     setServerLogCleanupLoading(true)
     try {
+      const params = new URLSearchParams({
+        mode: serverLogCleanupMode,
+        value: String(serverLogCleanupValue),
+      })
       const res = await api.delete(
-        `/api/performance/logs?mode=${serverLogCleanupMode}&value=${serverLogCleanupValue}`
+        `/api/performance/logs?${params.toString()}`
       )
       if (res.data.success) {
         const { deleted_count, freed_bytes } = res.data.data
@@ -376,7 +399,38 @@ export function LogSettingsSection({
               </p>
             </div>
             <DateTimePicker value={purgeDate} onChange={setPurgeDate} />
-            <div className='flex flex-wrap gap-3'>
+            <div className='flex flex-wrap items-end gap-3'>
+              <div className='grid w-[100px] gap-1.5'>
+                <Label className='text-xs'>{t('Log Type')}</Label>
+                <Select
+                  items={historyLogTypeOptions.map((option) => ({
+                    value: option.value,
+                    label: t(option.label),
+                  }))}
+                  value={historyLogCleanupType}
+                  onValueChange={(value) => {
+                    if (value === 'usage' || value === 'scheduler') {
+                      setHistoryLogCleanupType(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger className='w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className='min-w-[100px]'
+                  >
+                    <SelectGroup>
+                      {historyLogTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.label)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
               {quickSelectOptions.map((option) => (
                 <Button
                   key={option.label}
@@ -395,7 +449,9 @@ export function LogSettingsSection({
               >
                 {isStartingLogCleanup || logCleanupActive
                   ? t('Cleaning...')
-                  : t('Clean logs')}
+                  : t('Clean {{type}}', {
+                      type: historyLogCleanupTypeLabel,
+                    })}
               </Button>
             </div>
             {logCleanupTask && (
@@ -584,11 +640,15 @@ export function LogSettingsSection({
             <AlertDialogDescription>
               {formattedPurgeDate
                 ? t(
-                    'This will permanently remove all log entries created before {{date}}.',
-                    { date: formattedPurgeDate }
+                    'This will permanently remove {{type}} entries created before {{date}}.',
+                    {
+                      date: formattedPurgeDate,
+                      type: historyLogCleanupTypeLabel,
+                    }
                   )
                 : t(
-                    'This will permanently remove log entries before the selected timestamp.'
+                    'This will permanently remove {{type}} entries before the selected timestamp.',
+                    { type: historyLogCleanupTypeLabel }
                   )}{' '}
               {t('This action cannot be undone.')}
             </AlertDialogDescription>
@@ -601,7 +661,11 @@ export function LogSettingsSection({
               onClick={handleCleanLogs}
               disabled={isStartingLogCleanup}
             >
-              {isStartingLogCleanup ? t('Cleaning...') : t('Delete logs')}
+              {isStartingLogCleanup
+                ? t('Cleaning...')
+                : t('Delete {{type}}', {
+                    type: historyLogCleanupTypeLabel,
+                  })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

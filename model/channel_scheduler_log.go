@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
@@ -208,23 +209,33 @@ func DeleteChannelSchedulerLogs(targetTimestamp int64) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
-// DeleteChannelSchedulerLogsByRetention keeps the newest keep rows and deletes older scheduler logs.
-func DeleteChannelSchedulerLogsByRetention(keep int) (int64, error) {
-	if keep <= 0 {
-		return 0, nil
-	}
+func CountOldChannelSchedulerLogs(ctx context.Context, targetTimestamp int64) (int64, error) {
 	var total int64
-	if err := DB.Model(&ChannelSchedulerLog{}).Count(&total).Error; err != nil {
+	if err := DB.WithContext(ctx).Model(&ChannelSchedulerLog{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {
 		return 0, err
 	}
-	if total <= int64(keep) {
+	return total, nil
+}
+
+func DeleteOldChannelSchedulerLogBatch(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	var ids []int
+	if err := DB.WithContext(ctx).
+		Model(&ChannelSchedulerLog{}).
+		Where("created_at < ?", targetTimestamp).
+		Order("created_at asc, id asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
 		return 0, nil
 	}
-
-	boundary := ChannelSchedulerLog{}
-	if err := DB.Order("created_at desc, id desc").Offset(keep - 1).Limit(1).First(&boundary).Error; err != nil {
-		return 0, err
-	}
-	result := DB.Where("created_at < ? OR (created_at = ? AND id < ?)", boundary.CreatedAt, boundary.CreatedAt, boundary.Id).Delete(&ChannelSchedulerLog{})
+	result := DB.WithContext(ctx).Where("id IN ?", ids).Delete(&ChannelSchedulerLog{})
 	return result.RowsAffected, result.Error
 }

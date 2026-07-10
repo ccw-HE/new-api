@@ -23,8 +23,6 @@ type ChannelSchedulerSetting struct {
 	RespectAutoBan               bool `json:"respect_auto_ban"`
 	RetrySameChannel             bool `json:"retry_same_channel"`
 	MaxAttemptsPerRequest        int  `json:"max_attempts_per_request"`
-	SchedulerLogRetentionEnabled bool `json:"scheduler_log_retention_enabled"`
-	SchedulerLogRetentionCount   int  `json:"scheduler_log_retention_count"`
 }
 
 const (
@@ -32,8 +30,6 @@ const (
 	maxSchedulerFailureThreshold      = 100
 	defaultSchedulerDisableSeconds    = 7200
 	defaultSchedulerMaxAttempts       = 12
-	defaultSchedulerLogRetentionCount = 100
-	maxSchedulerLogRetentionCount     = 1000
 	minSchedulerRetryJitterMillis     = 100
 	maxSchedulerRetryJitterMillis     = 10000
 )
@@ -49,8 +45,6 @@ var channelSchedulerSetting = ChannelSchedulerSetting{
 	RespectAutoBan:               true,
 	RetrySameChannel:             true,
 	MaxAttemptsPerRequest:        defaultSchedulerMaxAttempts,
-	SchedulerLogRetentionEnabled: false,
-	SchedulerLogRetentionCount:   defaultSchedulerLogRetentionCount,
 }
 
 func init() {
@@ -71,12 +65,6 @@ func GetChannelSchedulerSetting() *ChannelSchedulerSetting {
 	}
 	if channelSchedulerSetting.MaxAttemptsPerRequest <= 0 {
 		channelSchedulerSetting.MaxAttemptsPerRequest = defaultSchedulerMaxAttempts
-	}
-	if channelSchedulerSetting.SchedulerLogRetentionCount <= 0 {
-		channelSchedulerSetting.SchedulerLogRetentionCount = defaultSchedulerLogRetentionCount
-	}
-	if channelSchedulerSetting.SchedulerLogRetentionCount > maxSchedulerLogRetentionCount {
-		channelSchedulerSetting.SchedulerLogRetentionCount = maxSchedulerLogRetentionCount
 	}
 	return &channelSchedulerSetting
 }

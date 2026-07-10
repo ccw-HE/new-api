@@ -13,6 +13,7 @@ import (
 
 func CreateLogCleanupSystemTask(c *gin.Context) {
 	targetTimestamp, _ := strconv.ParseInt(c.Query("target_timestamp"), 10, 64)
+	logType := c.Query("log_type")
 	if targetTimestamp == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -21,7 +22,7 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 		return
 	}
 
-	task, err := service.StartLogCleanupTask(targetTimestamp)
+	task, err := service.StartLogCleanupTask(targetTimestamp, logType)
 	if err != nil {
 		common.ApiError(c, err)
 		return

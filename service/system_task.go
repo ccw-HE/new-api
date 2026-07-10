@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,8 @@ const (
 	systemTaskRunnerIdleInterval = 15 * time.Second
 	systemTaskLockTTL            = 60 * time.Second
 	logCleanupBatchSize          = 100
+	logCleanupTypeUsage          = "usage"
+	logCleanupTypeScheduler      = "scheduler"
 
 	// systemTaskSchedulerInterval throttles how often the scheduler/stale-lock
 	// pass runs, independent of how often the runner wakes to claim tasks.
@@ -90,6 +93,7 @@ func init() {
 type LogCleanupPayload struct {
 	TargetTimestamp int64 `json:"target_timestamp"`
 	BatchSize       int   `json:"batch_size"`
+	LogType         string `json:"log_type,omitempty"`
 }
 
 type LogCleanupState struct {
@@ -101,6 +105,7 @@ type LogCleanupState struct {
 
 type LogCleanupResult struct {
 	DeletedCount int64 `json:"deleted_count"`
+	LogType      string `json:"log_type"`
 }
 
 var (
@@ -165,12 +170,16 @@ func StartSystemTaskRunner() {
 	})
 }
 
-func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
+func StartLogCleanupTask(targetTimestamp int64, logType string) (*model.SystemTask, error) {
 	if targetTimestamp <= 0 {
 		return nil, errors.New("target timestamp is required")
 	}
+	normalizedLogType, err := normalizeLogCleanupType(logType)
+	if err != nil {
+		return nil, err
+	}
 
-	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
+	activeTask, err := getActiveLogCleanupTaskForType(normalizedLogType)
 	if err != nil {
 		return nil, err
 	}
@@ -181,18 +190,41 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	payload := LogCleanupPayload{
 		TargetTimestamp: targetTimestamp,
 		BatchSize:       logCleanupBatchSize,
+		LogType:         normalizedLogType,
 	}
 	state := LogCleanupState{}
 	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, payload, state)
 	if err != nil {
-		activeTask, activeErr := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
+		activeTask, activeErr := getActiveLogCleanupTaskForType(normalizedLogType)
 		if activeErr == nil && activeTask != nil {
 			return activeTask, nil
+		}
+		if activeErr != nil {
+			return nil, activeErr
 		}
 		return nil, err
 	}
 	notifySystemTaskRunner()
 	return task, nil
+}
+
+func getActiveLogCleanupTaskForType(logType string) (*model.SystemTask, error) {
+	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
+	if err != nil || activeTask == nil {
+		return activeTask, err
+	}
+	activePayload := LogCleanupPayload{}
+	if err := activeTask.DecodePayload(&activePayload); err != nil {
+		return nil, err
+	}
+	activeLogType, err := normalizeLogCleanupType(activePayload.LogType)
+	if err != nil {
+		return nil, err
+	}
+	if activeLogType != logType {
+		return nil, errors.New("a different log cleanup task is already running")
+	}
+	return activeTask, nil
 }
 
 // EnqueueSystemTask creates an on-demand task of the given type. The returned
@@ -348,6 +380,12 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	if payload.BatchSize <= 0 {
 		payload.BatchSize = logCleanupBatchSize
 	}
+	logType, err := normalizeLogCleanupType(payload.LogType)
+	if err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+	payload.LogType = logType
 
 	state := LogCleanupState{}
 	if err := task.DecodeState(&state); err != nil {
@@ -356,7 +394,7 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	}
 
 	for {
-		remaining, err := model.CountOldLog(ctx, payload.TargetTimestamp)
+		remaining, err := countLogCleanupRows(ctx, payload.LogType, payload.TargetTimestamp)
 		if err != nil {
 			failSystemTask(task, runnerID, err)
 			return
@@ -376,7 +414,7 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		// rows cannot be removed and we fail instead of busy-looping.
 		progressed := false
 		for state.Remaining > 0 {
-			rowsAffected, err := model.DeleteOldLogBatch(ctx, payload.TargetTimestamp, payload.BatchSize)
+			rowsAffected, err := deleteLogCleanupBatch(ctx, payload.LogType, payload.TargetTimestamp, payload.BatchSize)
 			if err != nil {
 				failSystemTask(task, runnerID, err)
 				return
@@ -419,9 +457,42 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		return
 	}
 
-	result := LogCleanupResult{DeletedCount: state.Processed}
+	result := LogCleanupResult{DeletedCount: state.Processed, LogType: payload.LogType}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
+	}
+}
+
+func normalizeLogCleanupType(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "", logCleanupTypeUsage:
+		return logCleanupTypeUsage, nil
+	case logCleanupTypeScheduler:
+		return logCleanupTypeScheduler, nil
+	default:
+		return "", errors.New("log_type must be usage or scheduler")
+	}
+}
+
+func countLogCleanupRows(ctx context.Context, logType string, targetTimestamp int64) (int64, error) {
+	switch logType {
+	case logCleanupTypeUsage:
+		return model.CountOldLog(ctx, targetTimestamp)
+	case logCleanupTypeScheduler:
+		return model.CountOldChannelSchedulerLogs(ctx, targetTimestamp)
+	default:
+		return 0, errors.New("log_type must be usage or scheduler")
+	}
+}
+
+func deleteLogCleanupBatch(ctx context.Context, logType string, targetTimestamp int64, batchSize int) (int64, error) {
+	switch logType {
+	case logCleanupTypeUsage:
+		return model.DeleteOldLogBatch(ctx, targetTimestamp, batchSize)
+	case logCleanupTypeScheduler:
+		return model.DeleteOldChannelSchedulerLogBatch(ctx, targetTimestamp, batchSize)
+	default:
+		return 0, errors.New("log_type must be usage or scheduler")
 	}
 }
 
