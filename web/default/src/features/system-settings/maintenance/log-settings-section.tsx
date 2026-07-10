@@ -74,6 +74,12 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  getDefaultLogCleanupDate,
+  getLogCleanupDateDaysAgo,
+  getLogCleanupDateHoursAgo,
+  getLogCleanupTargetTimestamp,
+} from './log-cleanup-time'
 import type { LogCleanupTask, LogCleanupType } from '../types'
 
 const logSettingsSchema = z.object({
@@ -103,8 +109,6 @@ const historyLogTypeOptions = [
   label: string
 }>
 
-const HOURS_IN_DAY = 24
-
 function formatBytes(bytes: number, decimals = 2): string {
   if (!bytes || Number.isNaN(bytes)) return '0 Bytes'
   if (bytes === 0) return '0 Bytes'
@@ -118,26 +122,18 @@ function formatBytes(bytes: number, decimals = 2): string {
   }`
 }
 
-const getDateHoursAgo = (hours: number) => {
-  const date = new Date()
-  date.setHours(date.getHours() - hours)
-  return date
-}
-
-const getDateDaysAgo = (days: number) => getDateHoursAgo(days * HOURS_IN_DAY)
-
 const quickSelectOptions = [
   {
     label: '24 hours ago',
-    getValue: () => getDateHoursAgo(24),
+    getValue: () => getLogCleanupDateHoursAgo(24),
   },
   {
     label: '7 days ago',
-    getValue: () => getDateDaysAgo(7),
+    getValue: () => getLogCleanupDateDaysAgo(7),
   },
   {
     label: '30 days ago',
-    getValue: () => getDateDaysAgo(30),
+    getValue: () => getLogCleanupDateDaysAgo(30),
   },
 ]
 
@@ -158,7 +154,7 @@ export function LogSettingsSection({
   })
 
   const [purgeDate, setPurgeDate] = useState<Date | undefined>(() =>
-    getDateDaysAgo(30)
+    getDefaultLogCleanupDate()
   )
   const [isStartingLogCleanup, setIsStartingLogCleanup] = useState(false)
   const [logCleanupTask, setLogCleanupTask] = useState<LogCleanupTask | null>(
@@ -213,8 +209,7 @@ export function LogSettingsSection({
   }, [])
 
   const purgeTimestamp = useMemo(() => {
-    if (!purgeDate) return null
-    return Math.floor(purgeDate.getTime() / 1000)
+    return getLogCleanupTargetTimestamp(purgeDate)
   }, [purgeDate])
 
   const formattedPurgeDate = useMemo(() => {
@@ -398,7 +393,11 @@ export function LogSettingsSection({
                 )}
               </p>
             </div>
-            <DateTimePicker value={purgeDate} onChange={setPurgeDate} />
+            <DateTimePicker
+              value={purgeDate}
+              onChange={setPurgeDate}
+              displayFormat='YYYY-MM-DD HH:mm'
+            />
             <div className='flex flex-wrap items-end gap-3'>
               <div className='grid w-[100px] gap-1.5'>
                 <Label className='text-xs'>{t('Log Type')}</Label>

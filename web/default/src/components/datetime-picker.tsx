@@ -45,6 +45,7 @@ interface DateTimePickerProps {
   onChange?: (date: Date | undefined) => void
   placeholder?: string
   className?: string
+  displayFormat?: string
 }
 
 export function DateTimePicker({
@@ -52,6 +53,7 @@ export function DateTimePicker({
   onChange,
   placeholder,
   className,
+  displayFormat = 'YYYY-MM-DD',
 }: DateTimePickerProps) {
   const { t, i18n } = useTranslation()
   const placeholderText = placeholder ?? t('Select date')
@@ -123,7 +125,7 @@ export function DateTimePicker({
             />
           }
         >
-          {date ? dayjs(date).format('YYYY-MM-DD') : placeholderText}
+          {date ? dayjs(date).format(displayFormat) : placeholderText}
           <ChevronDownIcon className='h-4 w-4 opacity-50' />
         </PopoverTrigger>
         <PopoverContent className='w-auto overflow-hidden p-0' align='start'>
