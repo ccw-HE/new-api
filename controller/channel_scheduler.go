@@ -15,7 +15,7 @@ import (
 
 const (
 	schedulerConfigPrefix       = "channel_scheduler_setting."
-	maxSchedulerRetryTimes      = 1000
+	maxSchedulerRetryTimes      = 100
 	maxSchedulerDisableSeconds  = 30 * 24 * 3600
 	maxSchedulerAttemptsPerReq  = 10000
 	maxSchedulerLogRetention    = 1000
@@ -43,7 +43,7 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 		return
 	}
 	if setting.ChannelFailureThreshold < minSchedulerRetryTimes || setting.ChannelFailureThreshold > maxSchedulerRetryTimes {
-		common.ApiErrorMsg(c, "单渠道失败阈值必须在 1-1000 之间")
+		common.ApiErrorMsg(c, "单渠道失败阈值必须在 1-100 之间")
 		return
 	}
 	if setting.AutoDisableSeconds < minSchedulerDisableSeconds || setting.AutoDisableSeconds > maxSchedulerDisableSeconds {
@@ -173,7 +173,7 @@ func UpdateChannelSchedulerChannelConfig(c *gin.Context) {
 		return
 	}
 	if req.SchedulerRetryTimes != nil && (*req.SchedulerRetryTimes < minSchedulerRetryTimes || *req.SchedulerRetryTimes > maxSchedulerRetryTimes) {
-		common.ApiErrorMsg(c, "渠道级失败阈值必须在 1-1000 之间")
+		common.ApiErrorMsg(c, "渠道级失败阈值必须在 1-100 之间")
 		return
 	}
 	if req.SchedulerAutoDisableSeconds != nil && (*req.SchedulerAutoDisableSeconds < minSchedulerDisableSeconds || *req.SchedulerAutoDisableSeconds > maxSchedulerDisableSeconds) {

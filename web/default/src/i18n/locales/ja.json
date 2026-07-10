@@ -4940,7 +4940,7 @@
     "Scheduler Log Retention": "スケジューラーログ保持",
     "When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.": "有効にすると、スケジューラーはローカルの午前0時を過ぎるまでログを保持し、その後古い行を削除して設定された件数分の最新ログだけを残します。オフの場合、スケジューラーログは自動削除されません。",
     "Scheduler Log Retention Count": "スケジューラーログ保持数",
-    "Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.": "デフォルトは100です。次回のローカル午前0時後のクリーンアップ後、この件数分の最新スケジューラーログだけが保持されます。",
+    "Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.": "ローカル午前0時後の各クリーンアップで保持する最新スケジューラーログ数。デフォルトは100です。",
     "Save Scheduler Settings": "設定を保存",
     "Scheduler settings saved": "スケジューラー設定を保存しました",
     "Channel Scheduler Settings": "チャネルスケジュール設定",

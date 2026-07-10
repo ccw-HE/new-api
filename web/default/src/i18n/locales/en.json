@@ -4940,7 +4940,7 @@
     "Scheduler Log Retention": "Scheduler Log Retention",
     "When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.": "When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.",
     "Scheduler Log Retention Count": "Scheduler Log Retention Count",
-    "Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.": "Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.",
+    "Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.": "Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.",
     "Save Scheduler Settings": "Save Scheduler Settings",
     "Scheduler settings saved": "Scheduler settings saved",
     "Channel Scheduler Settings": "Channel Scheduler Settings",

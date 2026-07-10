@@ -4940,7 +4940,7 @@
     "Scheduler Log Retention": "Хранение журналов планировщика",
     "When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.": "Если включено, планировщик хранит журналы до наступления локальной полуночи, затем удаляет старые строки и оставляет только настроенное число самых новых записей. Если выключено, журналы планировщика автоматически не очищаются.",
     "Scheduler Log Retention Count": "Количество сохраняемых журналов планировщика",
-    "Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.": "По умолчанию 100. После следующей очистки после локальной полуночи будет сохранено только это количество самых новых строк журнала планировщика.",
+    "Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.": "Число новейших журналов планировщика, сохраняемых после каждой очистки после локальной полуночи. По умолчанию 100.",
     "Save Scheduler Settings": "Сохранить настройки",
     "Scheduler settings saved": "Настройки планировщика сохранены",
     "Channel Scheduler Settings": "Настройки планировщика канала",

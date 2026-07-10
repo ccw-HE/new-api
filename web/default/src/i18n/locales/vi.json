@@ -4940,7 +4940,7 @@
     "Scheduler Log Retention": "Lưu giữ nhật ký bộ lập lịch",
     "When enabled, the scheduler keeps its logs until local midnight passes, then removes older rows and keeps only the newest configured count. When off, scheduler logs are never cleaned automatically.": "Khi bật, bộ lập lịch giữ nhật ký cho đến khi qua nửa đêm theo giờ cục bộ, sau đó xóa các dòng cũ và chỉ giữ số bản ghi mới nhất đã cấu hình. Khi tắt, nhật ký bộ lập lịch sẽ không được tự động dọn dẹp.",
     "Scheduler Log Retention Count": "Số nhật ký bộ lập lịch được giữ",
-    "Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.": "Mặc định 100. Sau lần dọn dẹp tiếp theo sau nửa đêm cục bộ, chỉ giữ lại chừng này dòng nhật ký bộ lập lịch mới nhất.",
+    "Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.": "Số nhật ký bộ lập lịch mới nhất cần giữ sau mỗi lần dọn dẹp sau nửa đêm cục bộ. Mặc định 100.",
     "Save Scheduler Settings": "Lưu cài đặt",
     "Scheduler settings saved": "Đã lưu cài đặt bộ lập lịch",
     "Channel Scheduler Settings": "Cài đặt lập lịch của kênh",

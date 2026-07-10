@@ -376,9 +376,11 @@ func (channel *Channel) GetSchedulerManualRestoreAllowed() bool {
 	return *channel.SchedulerManualRestoreAllowed
 }
 
+const maxChannelSchedulerRetryTimes = 100
+
 // ResolveSchedulerRetryTimes 渠道级连续失败阈值；nil 或非法值回退到全局默认。
 func (channel *Channel) ResolveSchedulerRetryTimes(globalDefault int) int {
-	if channel.SchedulerRetryTimes == nil || *channel.SchedulerRetryTimes <= 0 {
+	if channel.SchedulerRetryTimes == nil || *channel.SchedulerRetryTimes <= 0 || *channel.SchedulerRetryTimes > maxChannelSchedulerRetryTimes {
 		return globalDefault
 	}
 	return *channel.SchedulerRetryTimes

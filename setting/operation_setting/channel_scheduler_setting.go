@@ -29,6 +29,7 @@ type ChannelSchedulerSetting struct {
 
 const (
 	defaultSchedulerFailureThreshold  = 3
+	maxSchedulerFailureThreshold      = 100
 	defaultSchedulerDisableSeconds    = 7200
 	defaultSchedulerMaxAttempts       = 12
 	defaultSchedulerLogRetentionCount = 100
@@ -61,6 +62,9 @@ func init() {
 func GetChannelSchedulerSetting() *ChannelSchedulerSetting {
 	if channelSchedulerSetting.ChannelFailureThreshold <= 0 {
 		channelSchedulerSetting.ChannelFailureThreshold = defaultSchedulerFailureThreshold
+	}
+	if channelSchedulerSetting.ChannelFailureThreshold > maxSchedulerFailureThreshold {
+		channelSchedulerSetting.ChannelFailureThreshold = maxSchedulerFailureThreshold
 	}
 	if channelSchedulerSetting.AutoDisableSeconds <= 0 {
 		channelSchedulerSetting.AutoDisableSeconds = defaultSchedulerDisableSeconds

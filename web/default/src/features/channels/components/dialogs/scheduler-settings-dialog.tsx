@@ -309,7 +309,7 @@ const NUMBER_FIELDS: Array<{
     description:
       'Consecutive failures before a channel is temporarily disabled (per-channel override available).',
     min: 1,
-    max: 1000,
+    max: 100,
   },
   {
     key: 'auto_disable_seconds',
@@ -463,7 +463,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
 
   return (
     <div className='space-y-4'>
-      <div className='max-h-96 space-y-4 overflow-auto pr-1'>
+      <div className='max-h-96 space-y-4 overflow-auto pb-3 pr-1'>
         {SWITCH_FIELDS.map((field) => (
           <div
             key={field.key}
@@ -616,7 +616,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
               />
               <p className='text-muted-foreground text-xs'>
                 {t(
-                  'Default 100. After the next local midnight cleanup, only this many newest scheduler log rows are kept.'
+                  'Number of latest scheduler logs to keep after each local-midnight cleanup. Default 100.'
                 )}
               </p>
             </div>

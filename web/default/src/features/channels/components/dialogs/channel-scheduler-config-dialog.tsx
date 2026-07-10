@@ -56,6 +56,8 @@ interface FormState {
   disableSeconds: string
 }
 
+const SCHEDULER_FAILURE_THRESHOLD_MAX = 100
+
 export function ChannelSchedulerConfigDialog({
   open,
   onOpenChange,
@@ -144,11 +146,16 @@ export function ChannelSchedulerConfigDialog({
     if (!form) return
     const retryTimes = form.retryTimes.trim()
     const disableSeconds = form.disableSeconds.trim()
+    const retryTimesValue = Number(retryTimes)
     if (
       retryTimes !== '' &&
-      (Number(retryTimes) < 1 || Number.isNaN(Number(retryTimes)))
+      (retryTimesValue < 1 ||
+        retryTimesValue > SCHEDULER_FAILURE_THRESHOLD_MAX ||
+        Number.isNaN(retryTimesValue))
     ) {
-      toast.error(t('Failure threshold must be a positive number'))
+      toast.error(
+        `${t('Failure Threshold')}: ${t('must be a number between')} 1 - ${SCHEDULER_FAILURE_THRESHOLD_MAX}`
+      )
       return
     }
     if (
@@ -162,7 +169,7 @@ export function ChannelSchedulerConfigDialog({
       scheduler_enabled: form.enabled,
       scheduler_auto_recover_enabled: form.autoRecover,
       scheduler_manual_restore_allowed: form.manualRestore,
-      scheduler_retry_times: retryTimes === '' ? null : Number(retryTimes),
+      scheduler_retry_times: retryTimes === '' ? null : retryTimesValue,
       scheduler_auto_disable_seconds:
         disableSeconds === '' ? null : Number(disableSeconds),
     })
@@ -278,6 +285,7 @@ export function ChannelSchedulerConfigDialog({
               id='scheduler-retry-times'
               type='number'
               min={1}
+              max={SCHEDULER_FAILURE_THRESHOLD_MAX}
               disabled={!isRoot}
               placeholder={`${t('Global default')}: ${config.global.channel_failure_threshold}`}
               value={form.retryTimes}
