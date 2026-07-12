@@ -1515,8 +1515,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	}
 	if len(geminiResponse.Candidates) == 0 {
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
-			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
-			return nil, service.NewEmptyResponseError("gemini", "prompt blocked: "+*geminiResponse.PromptFeedback.BlockReason)
+			return nil, service.NewUpstreamContentBlockedError(c, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
 		}
 		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "gemini_empty_candidates")
 		return nil, service.NewEmptyResponseError("gemini", "empty candidates")

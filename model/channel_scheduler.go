@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 // ChannelPriorityBucket 同一优先级的候选渠道分桶，按 Priority 从高到低排列。
@@ -66,32 +67,54 @@ func SetChannelAutoDisabledUntil(channelId int, until int64) error {
 }
 
 // SchedulerTempDisableChannel 原子地把处于启用状态的渠道置为调度器临时禁用：
-// status 与 auto_disabled_until 在同一把 channelStatusLock 内一次写入，
+// status、auto_disabled_until、other_info 与 ability.enabled 在同一数据库事务内写入，
 // 不存在"status=3 但 until=0"的中间态。前置条件为当前 status=启用（CAS 语义），
 // 因此并发的手动禁用、旧式自动禁用或另一个会话的临时禁用都不会被覆盖。
 func SchedulerTempDisableChannel(channelId int, reason string, until int64) bool {
-	channelStatusLock.Lock()
-	defer channelStatusLock.Unlock()
-
-	channel, err := GetChannelById(channelId, true)
+	changed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var channel Channel
+		if err := tx.Select("id", "other_info").Where("id = ? AND status = ?", channelId, common.ChannelStatusEnabled).Take(&channel).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		oldOtherInfo := channel.OtherInfo
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		query := tx.Model(&Channel{}).Where("id = ? AND status = ?", channelId, common.ChannelStatusEnabled)
+		if oldOtherInfo == "" {
+			query = query.Where("(other_info = ? OR other_info IS NULL)", "")
+		} else {
+			query = query.Where("other_info = ?", oldOtherInfo)
+		}
+		result := query.
+			Updates(map[string]interface{}{
+				"status":              common.ChannelStatusAutoDisabled,
+				"auto_disabled_until": until,
+				"other_info":          channel.OtherInfo,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		if err := tx.Model(&Ability{}).Where("channel_id = ?", channelId).Update("enabled", false).Error; err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
 	if err != nil {
-		return false
-	}
-	if channel.Status != common.ChannelStatusEnabled {
-		return false
-	}
-	info := channel.GetOtherInfo()
-	info["status_reason"] = reason
-	info["status_time"] = common.GetTimestamp()
-	channel.SetOtherInfo(info)
-	channel.Status = common.ChannelStatusAutoDisabled
-	channel.AutoDisabledUntil = until
-	if err := channel.SaveWithoutKey(); err != nil {
 		common.SysError(fmt.Sprintf("failed to temp disable channel: channel_id=%d, error=%v", channelId, err))
 		return false
 	}
-	if err := UpdateAbilityStatus(channelId, false); err != nil {
-		common.SysError(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+	if !changed {
+		return false
 	}
 	if common.MemoryCacheEnabled {
 		CacheUpdateChannelStatus(channelId, common.ChannelStatusAutoDisabled)
@@ -101,31 +124,44 @@ func SchedulerTempDisableChannel(channelId int, reason string, until int64) bool
 }
 
 // SchedulerRecoverChannel 原子地恢复调度器临时禁用的渠道。
-// 仅当 status=auto_disabled 且 auto_disabled_until>0 时执行；
-// requireExpired 为 true 时（自动恢复）还要求到期时间已过——
-// 在锁内以数据库当前值判定，避免恢复任务覆盖并发会话刚写入的新一轮禁用。
-func SchedulerRecoverChannel(channelId int, requireExpired bool) bool {
-	channelStatusLock.Lock()
-	defer channelStatusLock.Unlock()
-
-	channel, err := GetChannelById(channelId, true)
+// 仅当 status=auto_disabled、auto_disabled_until 与调用方扫描值完全一致且已经到期时执行；
+// 数据库 CAS 会拒绝旧恢复任务，避免覆盖并发会话刚写入的新一轮禁用。
+func SchedulerRecoverChannel(channelId int, expectedUntil int64) bool {
+	if expectedUntil <= 0 || expectedUntil > common.GetTimestamp() {
+		return false
+	}
+	changed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&Channel{}).
+			Where(
+				"id = ? AND status = ? AND auto_disabled_until = ? AND auto_disabled_until <= ?",
+				channelId,
+				common.ChannelStatusAutoDisabled,
+				expectedUntil,
+				common.GetTimestamp(),
+			).
+			Updates(map[string]interface{}{
+				"status":              common.ChannelStatusEnabled,
+				"auto_disabled_until": 0,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		if err := tx.Model(&Ability{}).Where("channel_id = ?", channelId).Update("enabled", true).Error; err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
 	if err != nil {
-		return false
-	}
-	if channel.Status != common.ChannelStatusAutoDisabled || channel.AutoDisabledUntil == 0 {
-		return false
-	}
-	if requireExpired && channel.AutoDisabledUntil > common.GetTimestamp() {
-		return false
-	}
-	channel.Status = common.ChannelStatusEnabled
-	channel.AutoDisabledUntil = 0
-	if err := channel.SaveWithoutKey(); err != nil {
 		common.SysError(fmt.Sprintf("failed to recover channel: channel_id=%d, error=%v", channelId, err))
 		return false
 	}
-	if err := UpdateAbilityStatus(channelId, true); err != nil {
-		common.SysError(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+	if !changed {
+		return false
 	}
 	if common.MemoryCacheEnabled {
 		CacheUpdateChannelStatus(channelId, common.ChannelStatusEnabled)

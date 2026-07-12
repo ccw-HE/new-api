@@ -171,7 +171,7 @@ function DisabledChannelsPanel({ active }: { active: boolean }) {
             <TableHead className='w-48 whitespace-nowrap'>
               {t('Disabled Until')}
             </TableHead>
-            <TableHead className='w-24 whitespace-nowrap text-center'>
+            <TableHead className='w-24 text-center whitespace-nowrap'>
               {t('Auto Recover')}
             </TableHead>
           </TableRow>
@@ -200,7 +200,7 @@ function DisabledChannelsPanel({ active }: { active: boolean }) {
                   {channel.status_reason || '-'}
                 </span>
               </TableCell>
-              <TableCell className='w-48 whitespace-nowrap font-mono text-xs'>
+              <TableCell className='w-48 font-mono text-xs whitespace-nowrap'>
                 {formatTimestampToDate(channel.auto_disabled_until)}
               </TableCell>
               <TableCell className='w-24 text-center'>
@@ -262,10 +262,7 @@ const SWITCH_FIELDS: Array<{
 ]
 
 const NUMBER_FIELDS: Array<{
-  key:
-    | 'channel_failure_threshold'
-    | 'auto_disable_seconds'
-    | 'max_attempts_per_request'
+  key: 'channel_failure_threshold' | 'auto_disable_seconds'
   label: string
   description: string
   min: number
@@ -286,14 +283,6 @@ const NUMBER_FIELDS: Array<{
       'Temporary disable duration in seconds. Default 7200 (2 hours).',
     min: 1,
     max: 2592000,
-  },
-  {
-    key: 'max_attempts_per_request',
-    label: 'Max Attempts Per Request',
-    description:
-      'Hard cap of upstream attempts within one request to bound total latency.',
-    min: 1,
-    max: 10000,
   },
 ]
 
@@ -330,7 +319,6 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
       setNumberDrafts({
         channel_failure_threshold: String(data.data.channel_failure_threshold),
         auto_disable_seconds: String(data.data.auto_disable_seconds),
-        max_attempts_per_request: String(data.data.max_attempts_per_request),
       })
     }
   }, [data])
@@ -371,9 +359,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
     const jitterDisabled = jitterMinMs === 0 && jitterMaxMs === 0
     const jitterValid =
       jitterDisabled ||
-      (jitterMinMs >= 100 &&
-        jitterMaxMs <= 10000 &&
-        jitterMinMs <= jitterMaxMs)
+      (jitterMinMs >= 100 && jitterMaxMs <= 10000 && jitterMinMs <= jitterMaxMs)
     if (!jitterValid) {
       toast.error(
         `${t('Retry Jitter')}: ${t('must be 0/0 or between 0.1 and 10 seconds')}`
@@ -384,7 +370,6 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
       ...config,
       channel_failure_threshold: parsed.channel_failure_threshold,
       auto_disable_seconds: parsed.auto_disable_seconds,
-      max_attempts_per_request: parsed.max_attempts_per_request,
     })
   }
 
@@ -434,16 +419,13 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
             <NumericSpinnerInput
               className='w-full min-w-0 justify-between sm:w-auto'
               label={t('Minimum Delay')}
-              value={jitterMillisecondsToSeconds(
-                config.retry_jitter_min_ms
-              )}
+              value={jitterMillisecondsToSeconds(config.retry_jitter_min_ms)}
               onChange={(value) =>
                 setConfig((prev) =>
                   prev
                     ? {
                         ...prev,
-                        retry_jitter_min_ms:
-                          jitterSecondsToMilliseconds(value),
+                        retry_jitter_min_ms: jitterSecondsToMilliseconds(value),
                       }
                     : prev
                 )
@@ -459,16 +441,13 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
             <NumericSpinnerInput
               className='w-full min-w-0 justify-between sm:w-auto'
               label={t('Maximum Delay')}
-              value={jitterMillisecondsToSeconds(
-                config.retry_jitter_max_ms
-              )}
+              value={jitterMillisecondsToSeconds(config.retry_jitter_max_ms)}
               onChange={(value) =>
                 setConfig((prev) =>
                   prev
                     ? {
                         ...prev,
-                        retry_jitter_max_ms:
-                          jitterSecondsToMilliseconds(value),
+                        retry_jitter_max_ms: jitterSecondsToMilliseconds(value),
                       }
                     : prev
                 )

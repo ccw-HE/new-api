@@ -219,6 +219,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				break
 			}
 
+			resetRelayAttemptState(c)
 			newAPIError = dispatchRelay(c, relayInfo, relayFormat)
 
 			if newAPIError == nil {
@@ -332,6 +333,7 @@ func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo,
 		}
 
 		relayInfo.DetectEmptyResponseForScheduler = true
+		resetRelayAttemptState(c)
 		newAPIError = dispatchRelay(c, relayInfo, relayFormat)
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -470,6 +472,9 @@ func schedulerFailureDisposition(c *gin.Context, apiErr *types.NewAPIError, rema
 	if apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed {
 		return service.SchedulerFailureFailoverWithoutDisable
 	}
+	if common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked) {
+		return service.SchedulerFailureFailoverWithoutDisable
+	}
 	if types.IsChannelError(apiErr) || apiErr.GetErrorCode() == types.ErrorCodeEmptyResponse {
 		return service.SchedulerFailureRetryCurrent
 	}
@@ -494,7 +499,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if shouldDisableChannelForRelay(c, err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -510,12 +515,24 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 // 其余 Key 服务；全部 Key 禁用后渠道进入旧式 auto disabled（无到期时间）。
 func processChannelErrorForScheduler(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
-	if channelError.UsingKey != "" && channelError.IsMultiKey && channelError.AutoBan && service.ShouldDisableChannel(err) {
+	if channelError.UsingKey != "" && channelError.IsMultiKey && channelError.AutoBan && shouldDisableChannelForRelay(c, err) {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
 	recordRelayErrorLog(c, err)
+}
+
+func shouldDisableChannelForRelay(c *gin.Context, err *types.NewAPIError) bool {
+	if common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked) {
+		return false
+	}
+	return service.ShouldDisableChannel(err)
+}
+
+func resetRelayAttemptState(c *gin.Context) {
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, false)
+	common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "")
 }
 
 func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {

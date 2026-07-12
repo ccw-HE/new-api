@@ -4930,8 +4930,6 @@
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Сколько сбоев подряд ведут к временному отключению (можно переопределить для канала).",
     "Auto Disable Seconds": "Длительность отключения (сек)",
     "Temporary disable duration in seconds. Default 7200 (2 hours).": "Длительность временного отключения в секундах. По умолчанию 7200 (2 часа).",
-    "Max Attempts Per Request": "Макс. попыток на запрос",
-    "Hard cap of upstream attempts within one request to bound total latency.": "Жёсткий лимит попыток в рамках одного запроса для ограничения задержки.",
     "Save Scheduler Settings": "Сохранить настройки",
     "Scheduler settings saved": "Настройки планировщика сохранены",
     "Channel Scheduler Settings": "Настройки планировщика канала",

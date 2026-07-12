@@ -16,11 +16,9 @@ const (
 	schedulerConfigPrefix       = "channel_scheduler_setting."
 	maxSchedulerRetryTimes      = 100
 	maxSchedulerDisableSeconds  = 30 * 24 * 3600
-	maxSchedulerAttemptsPerReq  = 10000
 	maxSchedulerRetryJitterMs   = 10000
 	minSchedulerDisableSeconds  = 1
 	minSchedulerRetryTimes      = 1
-	minSchedulerAttemptsPerReq  = 1
 	minSchedulerRetryJitterMs   = 100
 	schedulerRestoreAuditAction = "channel.scheduler_restore"
 	schedulerChannelCfgAuditKey = "channel.scheduler_config"
@@ -45,10 +43,6 @@ func UpdateChannelSchedulerConfig(c *gin.Context) {
 	}
 	if setting.AutoDisableSeconds < minSchedulerDisableSeconds || setting.AutoDisableSeconds > maxSchedulerDisableSeconds {
 		common.ApiErrorMsg(c, "临时禁用时长必须在 1 秒到 30 天之间")
-		return
-	}
-	if setting.MaxAttemptsPerRequest < minSchedulerAttemptsPerReq || setting.MaxAttemptsPerRequest > maxSchedulerAttemptsPerReq {
-		common.ApiErrorMsg(c, "单请求最大尝试次数必须在 1-10000 之间")
 		return
 	}
 	if !validSchedulerRetryJitter(setting.RetryJitterMinMilliseconds, setting.RetryJitterMaxMilliseconds) {

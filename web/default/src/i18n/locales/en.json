@@ -4930,8 +4930,6 @@
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Consecutive failures before a channel is temporarily disabled (per-channel override available).",
     "Auto Disable Seconds": "Auto Disable Seconds",
     "Temporary disable duration in seconds. Default 7200 (2 hours).": "Temporary disable duration in seconds. Default 7200 (2 hours).",
-    "Max Attempts Per Request": "Max Attempts Per Request",
-    "Hard cap of upstream attempts within one request to bound total latency.": "Hard cap of upstream attempts within one request to bound total latency.",
     "Save Scheduler Settings": "Save Scheduler Settings",
     "Scheduler settings saved": "Scheduler settings saved",
     "Channel Scheduler Settings": "Channel Scheduler Settings",

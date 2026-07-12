@@ -4930,8 +4930,6 @@
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "一時無効化までの連続失敗回数（チャネル単位で上書き可能）。",
     "Auto Disable Seconds": "無効化秒数",
     "Temporary disable duration in seconds. Default 7200 (2 hours).": "一時無効化の秒数。デフォルト 7200（2時間）。",
-    "Max Attempts Per Request": "リクエストあたり最大試行数",
-    "Hard cap of upstream attempts within one request to bound total latency.": "1リクエスト内の上流試行回数の上限。総遅延を抑えます。",
     "Save Scheduler Settings": "設定を保存",
     "Scheduler settings saved": "スケジューラー設定を保存しました",
     "Channel Scheduler Settings": "チャネルスケジュール設定",

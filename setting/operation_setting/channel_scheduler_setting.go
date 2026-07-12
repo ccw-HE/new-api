@@ -13,38 +13,35 @@ import (
 //
 // Enabled=false 时完全走旧调度逻辑。
 type ChannelSchedulerSetting struct {
-	Enabled                      bool `json:"enabled"`
-	ChannelFailureThreshold      int  `json:"channel_failure_threshold"`
-	AutoDisableSeconds           int  `json:"auto_disable_seconds"`
-	RetryJitterMinMilliseconds   int  `json:"retry_jitter_min_ms"`
-	RetryJitterMaxMilliseconds   int  `json:"retry_jitter_max_ms"`
-	AllowPriorityFallback        bool `json:"allow_priority_fallback"`
-	LogEnabled                   bool `json:"log_enabled"`
-	RespectAutoBan               bool `json:"respect_auto_ban"`
-	RetrySameChannel             bool `json:"retry_same_channel"`
-	MaxAttemptsPerRequest        int  `json:"max_attempts_per_request"`
+	Enabled                    bool `json:"enabled"`
+	ChannelFailureThreshold    int  `json:"channel_failure_threshold"`
+	AutoDisableSeconds         int  `json:"auto_disable_seconds"`
+	RetryJitterMinMilliseconds int  `json:"retry_jitter_min_ms"`
+	RetryJitterMaxMilliseconds int  `json:"retry_jitter_max_ms"`
+	AllowPriorityFallback      bool `json:"allow_priority_fallback"`
+	LogEnabled                 bool `json:"log_enabled"`
+	RespectAutoBan             bool `json:"respect_auto_ban"`
+	RetrySameChannel           bool `json:"retry_same_channel"`
 }
 
 const (
-	defaultSchedulerFailureThreshold  = 3
-	maxSchedulerFailureThreshold      = 100
-	defaultSchedulerDisableSeconds    = 7200
-	defaultSchedulerMaxAttempts       = 12
-	minSchedulerRetryJitterMillis     = 100
-	maxSchedulerRetryJitterMillis     = 10000
+	defaultSchedulerFailureThreshold = 3
+	maxSchedulerFailureThreshold     = 100
+	defaultSchedulerDisableSeconds   = 7200
+	minSchedulerRetryJitterMillis    = 100
+	maxSchedulerRetryJitterMillis    = 10000
 )
 
 var channelSchedulerSetting = ChannelSchedulerSetting{
-	Enabled:                      false,
-	ChannelFailureThreshold:      defaultSchedulerFailureThreshold,
-	AutoDisableSeconds:           defaultSchedulerDisableSeconds,
-	RetryJitterMinMilliseconds:   0,
-	RetryJitterMaxMilliseconds:   0,
-	AllowPriorityFallback:        true,
-	LogEnabled:                   true,
-	RespectAutoBan:               true,
-	RetrySameChannel:             true,
-	MaxAttemptsPerRequest:        defaultSchedulerMaxAttempts,
+	Enabled:                    false,
+	ChannelFailureThreshold:    defaultSchedulerFailureThreshold,
+	AutoDisableSeconds:         defaultSchedulerDisableSeconds,
+	RetryJitterMinMilliseconds: 0,
+	RetryJitterMaxMilliseconds: 0,
+	AllowPriorityFallback:      true,
+	LogEnabled:                 true,
+	RespectAutoBan:             true,
+	RetrySameChannel:           true,
 }
 
 func init() {
@@ -62,9 +59,6 @@ func GetChannelSchedulerSetting() *ChannelSchedulerSetting {
 	}
 	if channelSchedulerSetting.AutoDisableSeconds <= 0 {
 		channelSchedulerSetting.AutoDisableSeconds = defaultSchedulerDisableSeconds
-	}
-	if channelSchedulerSetting.MaxAttemptsPerRequest <= 0 {
-		channelSchedulerSetting.MaxAttemptsPerRequest = defaultSchedulerMaxAttempts
 	}
 	return &channelSchedulerSetting
 }

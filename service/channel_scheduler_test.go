@@ -2,8 +2,10 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,7 +198,6 @@ func TestSchedulerSessionFailoverSequence(t *testing.T) {
 		s.Enabled = true
 		s.ChannelFailureThreshold = 3
 		s.AutoDisableSeconds = 7200
-		s.MaxAttemptsPerRequest = 50
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 201, name: "A", priority: 3, autoBan: 1})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 202, name: "B", priority: 3, autoBan: 1})
@@ -251,7 +252,6 @@ func TestSchedulerSessionTwoFailuresNoDisable(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 3
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 211, name: "A", priority: 3, autoBan: 1})
 
@@ -279,7 +279,6 @@ func TestSchedulerSessionAutoBanFalse(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 3
 		s.RespectAutoBan = true
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 221, name: "A", priority: 3, autoBan: 0})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 222, name: "B", priority: 3, autoBan: 1})
@@ -308,7 +307,6 @@ func TestSchedulerSessionIgnoreAutoBan(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 2
 		s.RespectAutoBan = false
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 231, name: "A", priority: 3, autoBan: 0})
 
@@ -328,7 +326,6 @@ func TestSchedulerSessionNonRetryableFailure(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 1
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 241, name: "A", priority: 3, autoBan: 1})
 
@@ -349,7 +346,6 @@ func TestSchedulerSessionImmediateFailoverTemporarilyDisablesChannel(t *testing.
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 3
 		s.AutoDisableSeconds = 7200
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{
 		id:             243,
@@ -385,7 +381,6 @@ func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) 
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 1
-		s.MaxAttemptsPerRequest = 12
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 245, name: "A", priority: 3, autoBan: 1})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 246, name: "B", priority: 3, autoBan: 1})
@@ -407,12 +402,10 @@ func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) 
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chB.Id).Status)
 }
 
-// 单请求最大尝试次数
-func TestSchedulerSessionMaxAttempts(t *testing.T) {
+func TestSchedulerSessionExhaustsChannelRetryThresholdBeyondConfiguredRequestCap(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 100
-		s.MaxAttemptsPerRequest = 5
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 251, name: "A", priority: 3, autoBan: 1})
 
@@ -430,7 +423,59 @@ func TestSchedulerSessionMaxAttempts(t *testing.T) {
 		}
 		channel = next
 	}
-	assert.Equal(t, 5, attempts)
+	assert.Equal(t, 100, attempts)
+	assert.Equal(t, 0, session.RemainingAttempts())
+}
+
+func TestSchedulerSessionInternalFuseStopsPathologicalCandidateSet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	channels := make([]*model.Channel, 0, 101)
+	for i := 0; i < 101; i++ {
+		channels = append(channels, &model.Channel{
+			Id:                  1000 + i,
+			Name:                fmt.Sprintf("channel-%d", i),
+			Status:              common.ChannelStatusEnabled,
+			AutoBan:             common.GetPointer(1),
+			SchedulerRetryTimes: common.GetPointer(100),
+		})
+	}
+	session := &ChannelSchedulerSession{
+		ctx: c,
+		setting: operation_setting.ChannelSchedulerSetting{
+			ChannelFailureThreshold: 100,
+			AllowPriorityFallback:   true,
+			RetrySameChannel:        true,
+		},
+		groups: []schedulerGroupCandidates{{
+			name: "default",
+			buckets: []*model.ChannelPriorityBucket{{
+				Priority: 1,
+				Channels: channels,
+			}},
+		}},
+		current:      channels[0],
+		currentGroup: "default",
+		failures:     make(map[int]int),
+		excluded:     make(map[int]bool),
+	}
+	session.ensureFailoverAttemptBudget(channels[0])
+
+	attempts := 0
+	channel := channels[0]
+	for {
+		attempts++
+		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
+		next, ok := session.NextChannel()
+		if !ok {
+			break
+		}
+		channel = next
+	}
+
+	assert.Equal(t, schedulerMaxEffectiveAttemptsPerRequest, attempts)
 	assert.Equal(t, 0, session.RemainingAttempts())
 }
 
@@ -438,7 +483,6 @@ func TestSchedulerSessionLowConfiguredMaxAttemptsDoesNotCutOffFailover(t *testin
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 3
-		s.MaxAttemptsPerRequest = 3
 		s.AllowPriorityFallback = true
 		s.RetrySameChannel = true
 	})
@@ -474,7 +518,6 @@ func TestSchedulerSessionChannelLevelOverrides(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 3
 		s.AutoDisableSeconds = 7200
-		s.MaxAttemptsPerRequest = 20
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{
 		id: 261, name: "A", priority: 3, autoBan: 1,
@@ -518,7 +561,6 @@ func TestSchedulerSessionRetrySameChannelDisabled(t *testing.T) {
 		s.ChannelFailureThreshold = 10
 		s.RetrySameChannel = false
 		s.AllowPriorityFallback = false
-		s.MaxAttemptsPerRequest = 20
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 341, name: "A", priority: 3, autoBan: 1})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 342, name: "B", priority: 3, autoBan: 1})
@@ -547,7 +589,6 @@ func TestSchedulerSessionSkipsConcurrentlyDisabledCandidates(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 1
-		s.MaxAttemptsPerRequest = 10
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 351, name: "A", priority: 3, autoBan: 1})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 352, name: "B", priority: 3, autoBan: 1})
@@ -585,12 +626,13 @@ func TestSchedulerRecoverChannelAtomicGuards(t *testing.T) {
 	now := common.GetTimestamp()
 	fresh := seedSchedulerChannel(t, seedChannelOptions{id: 361, name: "fresh", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 3000})
 
-	// requireExpired=true（自动恢复）：未到期必须拒绝
-	assert.False(t, model.SchedulerRecoverChannel(fresh.Id, true))
+	// 未到期必须拒绝。
+	assert.False(t, model.SchedulerRecoverChannel(fresh.Id, fresh.AutoDisabledUntil))
 	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, fresh.Id).Status)
 
-	// requireExpired=false（手动恢复）：允许
-	assert.True(t, model.SchedulerRecoverChannel(fresh.Id, false))
+	expiredUntil := now - 1
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", fresh.Id).Update("auto_disabled_until", expiredUntil).Error)
+	assert.True(t, model.SchedulerRecoverChannel(fresh.Id, expiredUntil))
 	reloaded := reloadChannel(t, fresh.Id)
 	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
 	assert.EqualValues(t, 0, reloaded.AutoDisabledUntil)
@@ -601,13 +643,85 @@ func TestSchedulerRecoverChannelAtomicGuards(t *testing.T) {
 	assert.Equal(t, common.ChannelStatusManuallyDisabled, reloadChannel(t, manual.Id).Status)
 }
 
+func TestSchedulerStateTransitionsUseDatabaseCAS(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	channel := seedSchedulerChannel(t, seedChannelOptions{id: 363, name: "cas", priority: 3, autoBan: 1})
+	disableUntil := now + 600
+
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- model.SchedulerTempDisableChannel(channel.Id, "test", disableUntil)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	disableWins := 0
+	for result := range results {
+		if result {
+			disableWins++
+		}
+	}
+	assert.Equal(t, 1, disableWins)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, channel.Id).Status)
+	assert.False(t, abilityEnabled(t, channel.Id))
+
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("auto_disabled_until", now-1).Error)
+	recoverUntil := now - 1
+	start = make(chan struct{})
+	results = make(chan bool, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- model.SchedulerRecoverChannel(channel.Id, recoverUntil)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	recoverWins := 0
+	for result := range results {
+		if result {
+			recoverWins++
+		}
+	}
+	assert.Equal(t, 1, recoverWins)
+	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, channel.Id).Status)
+	assert.True(t, abilityEnabled(t, channel.Id))
+}
+
+func TestSchedulerRecoverChannelRejectsStaleDisableCycle(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	oldUntil := now - 100
+	channel := seedSchedulerChannel(t, seedChannelOptions{id: 364, name: "stale", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: oldUntil})
+	newUntil := now - 10
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("auto_disabled_until", newUntil).Error)
+
+	assert.False(t, model.SchedulerRecoverChannel(channel.Id, oldUntil))
+	reloaded := reloadChannel(t, channel.Id)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
+	assert.Equal(t, newUntil, reloaded.AutoDisabledUntil)
+	assert.False(t, abilityEnabled(t, channel.Id))
+}
+
 // 关闭降级：同级耗尽后不落到低优先级
 func TestSchedulerSessionNoPriorityFallback(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 1
 		s.AllowPriorityFallback = false
-		s.MaxAttemptsPerRequest = 20
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 271, name: "A", priority: 3, autoBan: 1})
 	seedSchedulerChannel(t, seedChannelOptions{id: 272, name: "C", priority: 2, autoBan: 1})
@@ -627,7 +741,6 @@ func TestSchedulerSessionFailoverWithMemoryCache(t *testing.T) {
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
 		s.ChannelFailureThreshold = 2
 		s.AutoDisableSeconds = 7200
-		s.MaxAttemptsPerRequest = 20
 	})
 	chA := seedSchedulerChannel(t, seedChannelOptions{id: 281, name: "A", priority: 3, autoBan: 1})
 	chB := seedSchedulerChannel(t, seedChannelOptions{id: 282, name: "B", priority: 3, autoBan: 1})

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -148,4 +150,43 @@ func TestSchedulerFailureDispositionStopsForTerminalConditions(t *testing.T) {
 		c.Request = req.WithContext(ctx)
 		assert.Equal(t, service.SchedulerFailureStop, schedulerFailureDisposition(c, apiErr, 3))
 	})
+}
+
+func TestSchedulerFailureDispositionFailsOverContentBlockWithoutDisabling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	blockedErr := types.NewOpenAIError(errors.New("upstream response blocked"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
+
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, true)
+	assert.Equal(t, service.SchedulerFailureFailoverWithoutDisable, schedulerFailureDisposition(c, blockedErr, 3))
+
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, false)
+	assert.Equal(t, service.SchedulerFailureRetryCurrent, schedulerFailureDisposition(c, blockedErr, 3))
+}
+
+func TestContentBlockNeverDisablesChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, true)
+
+	originalRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	operation_setting.AutomaticDisableStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: http.StatusBadGateway, End: http.StatusBadGateway}}
+	t.Cleanup(func() { operation_setting.AutomaticDisableStatusCodeRanges = originalRanges })
+
+	blockedErr := types.NewOpenAIError(errors.New("upstream response blocked"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
+	assert.False(t, shouldDisableChannelForRelay(c, blockedErr))
+}
+
+func TestResetRelayAttemptStateClearsContentBlockMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, true)
+	common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "stale block reason")
+
+	resetRelayAttemptState(c)
+
+	assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked))
+	assert.Empty(t, common.GetContextKeyString(c, constant.ContextKeyAdminRejectReason))
 }

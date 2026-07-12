@@ -186,9 +186,29 @@ func InitOptionMap() {
 	loadOptionsFromDatabase()
 }
 
+const deprecatedSchedulerAttemptLimitOption = "channel_scheduler_setting.max_attempts_per_request"
+
+func isDeprecatedOptionKey(key string) bool {
+	return key == deprecatedSchedulerAttemptLimitOption
+}
+
+func deleteOptionMapKey(key string) {
+	common.OptionMapRWMutex.Lock()
+	delete(common.OptionMap, key)
+	common.OptionMapRWMutex.Unlock()
+}
+
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		if isDeprecatedOptionKey(option.Key) {
+			if err := DB.Where("key = ?", option.Key).Delete(&Option{}).Error; err != nil {
+				common.SysLog("failed to purge deprecated option: " + err.Error())
+				continue
+			}
+			deleteOptionMapKey(option.Key)
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
@@ -205,6 +225,13 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if isDeprecatedOptionKey(key) {
+		if err := DB.Where("key = ?", key).Delete(&Option{}).Error; err != nil {
+			return err
+		}
+		deleteOptionMapKey(key)
+		return nil
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -231,6 +258,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
+			if isDeprecatedOptionKey(k) {
+				if err := tx.Where("key = ?", k).Delete(&Option{}).Error; err != nil {
+					return err
+				}
+				continue
+			}
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
 				return err
@@ -246,6 +279,10 @@ func UpdateOptionsBulk(values map[string]string) error {
 		return err
 	}
 	for k, v := range values {
+		if isDeprecatedOptionKey(k) {
+			deleteOptionMapKey(k)
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}

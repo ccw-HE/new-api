@@ -4,7 +4,8 @@ cd /d "%~dp0"
 
 set "ROOT=%~dp0"
 set "WEB_PORT=3001"
-set "PID_FILE=%ROOT%.newapi-web.pid"
+set "PID_FILE=%ROOT%.newapi-web.pid.json"
+set "WEB_PROCESS_HELPER=%ROOT%scripts\newapi-web-process.ps1"
 set "DOCKER_BIN=C:\Program Files\Docker\Docker\resources\bin"
 set "DOCKER_DESKTOP=C:\Program Files\Docker\Docker\Docker Desktop.exe"
 set "DOCKER_CLI=C:\Program Files\Docker\Docker\DockerCli.exe"
@@ -70,13 +71,10 @@ if not exist "%ROOT%web\node_modules" (
 
 echo.
 echo [5/6] Starting frontend WebUI...
-call :IsPortListening %WEB_PORT%
-if errorlevel 1 (
-  if exist "%PID_FILE%" del /f /q "%PID_FILE%" >nul 2>nul
-  start "new-api WebUI" /min /D "%ROOT%web\default" cmd /d /s /c ""%BUN_EXE%" run dev -- --host 0.0.0.0 --port %WEB_PORT%"
-) else (
-  echo Port %WEB_PORT% is already listening. Skip frontend start.
-)
+call :AssertWebPortFree
+if errorlevel 1 goto failed
+call :LaunchWeb
+if errorlevel 1 goto failed
 
 echo.
 echo [6/6] Opening browser...
@@ -170,28 +168,26 @@ if defined COMPOSE_BUILD_ARG (
 )
 exit /b 0
 
-:IsPortListening
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-NetTCPConnection -LocalPort %1 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
+:AssertWebPortFree
+if not exist "%WEB_PROCESS_HELPER%" (
+  echo WebUI process helper not found: %WEB_PROCESS_HELPER%
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action AssertFree -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
 exit /b %errorlevel%
 
-:WaitWeb
-echo Waiting for WebUI...
-for /l %%i in (1,1,90) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:%WEB_PORT%' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch { }; exit 1"
-  if not errorlevel 1 exit /b 0
-  timeout /t 2 /nobreak >nul
-)
-echo WebUI did not respond in time.
-exit /b 1
-
-:SaveWebPid
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$pidFile=$env:PID_FILE; $port=[int]$env:WEB_PORT; $conn=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($conn -and $conn.OwningProcess) { Set-Content -LiteralPath $pidFile -Value $conn.OwningProcess -Encoding ASCII; Write-Host ('WebUI PID: ' + $conn.OwningProcess) }"
-exit /b 0
+:LaunchWeb
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Launch -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT% -LaunchMode BunDev -Executable "%BUN_EXE%"
+exit /b %errorlevel%
 
 :stop
 echo.
 echo Stopping frontend WebUI...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$pidFile=$env:PID_FILE; $port=[int]$env:WEB_PORT; $targets=@(); if (Test-Path -LiteralPath $pidFile) { $raw=(Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1); if ($raw -match '^\d+$') { $targets += [int]$raw } }; $conns=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; foreach ($conn in $conns) { if ($conn.OwningProcess -gt 0) { $targets += [int]$conn.OwningProcess } }; $targets=$targets | Select-Object -Unique; foreach ($id in $targets) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue; Write-Host ('Stopped PID: ' + $id) }; if (Test-Path -LiteralPath $pidFile) { Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue }"
+if exist "%WEB_PROCESS_HELPER%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Stop -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
+) else (
+  echo WebUI process helper not found. No frontend process was terminated; handle it manually.
+)
 
 echo.
 echo Stopping Docker services...

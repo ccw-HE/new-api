@@ -72,6 +72,7 @@ type ChannelSchedulerSession struct {
 	failures      map[int]int
 	excluded      map[int]bool
 	totalAttempts int
+	attemptBudget int
 }
 
 // NewChannelSchedulerSession 创建会话并加载候选渠道。
@@ -123,28 +124,26 @@ func (s *ChannelSchedulerSession) ensureFailoverAttemptBudget(initial *model.Cha
 	if initial == nil {
 		return
 	}
-	initialThreshold := initial.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
-	if s.setting.MaxAttemptsPerRequest < initialThreshold {
-		return
-	}
-	minAttempts := 0
+	attemptBudget := 0
+	fuseReached := false
 	seen := map[int]bool{}
 	addThreshold := func(channel *model.Channel) bool {
 		if channel == nil || channel.Status != common.ChannelStatusEnabled || seen[channel.Id] {
 			return false
 		}
 		seen[channel.Id] = true
-		minAttempts += channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
-		if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
-			minAttempts = schedulerMaxEffectiveAttemptsPerRequest
+		threshold := channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+		if threshold >= schedulerMaxEffectiveAttemptsPerRequest-attemptBudget {
+			attemptBudget = schedulerMaxEffectiveAttemptsPerRequest
+			fuseReached = true
 			return true
 		}
+		attemptBudget += threshold
 		return false
 	}
 	if addThreshold(initial) {
-		if minAttempts > s.setting.MaxAttemptsPerRequest {
-			s.setting.MaxAttemptsPerRequest = minAttempts
-		}
+		s.attemptBudget = attemptBudget
+		common.SysLog(fmt.Sprintf("channel scheduler emergency attempt fuse reached: request_id=%s, max_attempts=%d", s.ctx.GetString(common.RequestIdKey), schedulerMaxEffectiveAttemptsPerRequest))
 		return
 	}
 	for _, group := range s.groups {
@@ -154,16 +153,20 @@ func (s *ChannelSchedulerSession) ensureFailoverAttemptBudget(initial *model.Cha
 					break
 				}
 			}
-			if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
+			if fuseReached {
 				break
 			}
 		}
-		if minAttempts >= schedulerMaxEffectiveAttemptsPerRequest {
+		if fuseReached {
 			break
 		}
 	}
-	if minAttempts > s.setting.MaxAttemptsPerRequest {
-		s.setting.MaxAttemptsPerRequest = minAttempts
+	if attemptBudget == 0 {
+		attemptBudget = initial.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+	}
+	s.attemptBudget = attemptBudget
+	if fuseReached {
+		common.SysLog(fmt.Sprintf("channel scheduler emergency attempt fuse reached: request_id=%s, max_attempts=%d", s.ctx.GetString(common.RequestIdKey), schedulerMaxEffectiveAttemptsPerRequest))
 	}
 }
 
@@ -204,9 +207,9 @@ func (s *ChannelSchedulerSession) AdoptInitialChannel(channelId int) *model.Chan
 }
 
 // NextChannel 返回下一个应尝试的渠道。
-// 返回 false 表示候选耗尽或达到单请求最大尝试次数，应停止重试。
+// 返回 false 表示候选耗尽或达到内部异常保险丝，应停止重试。
 func (s *ChannelSchedulerSession) NextChannel() (*model.Channel, bool) {
-	if s.totalAttempts >= s.setting.MaxAttemptsPerRequest {
+	if s.totalAttempts >= s.attemptBudget {
 		return nil, false
 	}
 	// 同渠道连续重试：未被排除前继续使用当前渠道
@@ -261,9 +264,9 @@ func (s *ChannelSchedulerSession) NextChannel() (*model.Channel, bool) {
 	return nil, false
 }
 
-// RemainingAttempts 剩余可用尝试次数，供 shouldRetry 的次数判断使用。
+// RemainingAttempts 返回完整候选预算内的剩余尝试次数；预算只受内部异常保险丝保护。
 func (s *ChannelSchedulerSession) RemainingAttempts() int {
-	remaining := s.setting.MaxAttemptsPerRequest - s.totalAttempts
+	remaining := s.attemptBudget - s.totalAttempts
 	if remaining < 0 {
 		return 0
 	}
@@ -466,8 +469,8 @@ func RecoverExpiredSchedulerChannels() (int, error) {
 		if !channel.GetSchedulerAutoRecoverEnabled() {
 			continue
 		}
-		// 原子恢复：锁内重新校验 status/until/到期，避免覆盖并发写入的新一轮禁用
-		if !model.SchedulerRecoverChannel(channel.Id, true) {
+		// 原子恢复：数据库 CAS 重新校验 status/until/到期，避免覆盖并发写入的新一轮禁用
+		if !model.SchedulerRecoverChannel(channel.Id, channel.AutoDisabledUntil) {
 			continue
 		}
 		recovered++
@@ -506,7 +509,7 @@ func ManualRestoreSchedulerChannel(channelId int, operatorId int, operatorName s
 	if channel.AutoDisabledUntil > common.GetTimestamp() {
 		return errors.New("该渠道临时禁用尚未到期")
 	}
-	if !model.SchedulerRecoverChannel(channelId, true) {
+	if !model.SchedulerRecoverChannel(channelId, channel.AutoDisabledUntil) {
 		return errors.New("恢复渠道失败")
 	}
 	model.InitChannelCache()

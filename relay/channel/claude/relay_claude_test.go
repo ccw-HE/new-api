@@ -1,10 +1,17 @@
 package claude
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -276,6 +283,25 @@ func TestBuildOpenAIStyleUsageFromClaudeUsageDefaultsAggregateCacheCreationTo5m(
 
 	require.Equal(t, 50, openAIUsage.ClaudeCacheCreation5mTokens)
 	require.Equal(t, 0, openAIUsage.ClaudeCacheCreation1hTokens)
+}
+
+func TestHandleClaudeResponseDataRefusalReturnsGenericRetryableError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+	payload := []byte(`{"type":"message","stop_reason":"refusal","content":[]}`)
+
+	apiErr := HandleClaudeResponseData(c, info, claudeInfo, &http.Response{StatusCode: http.StatusOK}, payload)
+
+	require.NotNil(t, apiErr)
+	require.Equal(t, types.ErrorCodeEmptyResponse, apiErr.GetErrorCode())
+	require.NotContains(t, apiErr.Error(), "refusal")
+	require.Equal(t, "claude_stop_reason=refusal", common.GetContextKeyString(c, constant.ContextKeyAdminRejectReason))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked))
+	require.Equal(t, 0, recorder.Body.Len())
 }
 
 func TestRequestOpenAI2ClaudeMessage_ClaudeOpus48HighUsesAdaptiveThinking(t *testing.T) {

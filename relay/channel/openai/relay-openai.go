@@ -373,8 +373,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
-			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "openai_finish_reason=content_filter")
-			break
+			return nil, service.NewUpstreamContentBlockedError(c, "openai_finish_reason=content_filter")
 		}
 	}
 	if info.DetectEmptyResponseForScheduler && !service.HasOpenAITextDeliverable(&simpleResponse) {

@@ -4930,8 +4930,6 @@
     "Consecutive failures before a channel is temporarily disabled (per-channel override available).": "Nombre d'échecs consécutifs avant désactivation temporaire (surcharge par canal possible).",
     "Auto Disable Seconds": "Durée de désactivation (secondes)",
     "Temporary disable duration in seconds. Default 7200 (2 hours).": "Durée de désactivation temporaire en secondes. Par défaut 7200 (2 heures).",
-    "Max Attempts Per Request": "Tentatives max par requête",
-    "Hard cap of upstream attempts within one request to bound total latency.": "Plafond strict de tentatives amont par requête pour limiter la latence totale.",
     "Save Scheduler Settings": "Enregistrer les paramètres",
     "Scheduler settings saved": "Paramètres du planificateur enregistrés",
     "Channel Scheduler Settings": "Paramètres du planificateur du canal",

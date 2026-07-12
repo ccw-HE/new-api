@@ -115,7 +115,6 @@ export interface SchedulerGlobalConfig {
   log_enabled: boolean
   respect_auto_ban: boolean
   retry_same_channel: boolean
-  max_attempts_per_request: number
 }
 
 export interface SchedulerChannelConfig {
