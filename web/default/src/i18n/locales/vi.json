@@ -4901,6 +4901,7 @@
     "Disable Duration": "Thời gian vô hiệu hóa",
     "Disabled Until": "Vô hiệu hóa đến",
     "Channel Path": "Chuỗi kênh",
+    "Advanced Scheduler": "Bộ lập lịch nâng cao",
     "Channel Scheduler": "Bộ lập lịch kênh",
     "Same-priority failover: a channel failing consecutively is temporarily disabled, then same-priority channels are tried before falling back to lower priority.": "Chuyển dự phòng cùng mức ưu tiên: kênh lỗi liên tiếp sẽ bị vô hiệu hóa tạm thời, thử các kênh cùng mức ưu tiên trước khi hạ xuống mức thấp hơn.",
     "Temp-Disabled Channels": "Kênh bị vô hiệu hóa tạm thời",

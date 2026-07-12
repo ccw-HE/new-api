@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Loader2, RotateCcw } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -41,7 +41,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   getSchedulerDisabledChannels,
   getSchedulerGlobalConfig,
-  restoreSchedulerChannel,
   schedulerQueryKeys,
   updateSchedulerGlobalConfig,
 } from '@/features/usage-logs/scheduler/api'
@@ -50,7 +49,6 @@ import { formatTimestampToDate } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { channelsQueryKeys } from '../../lib'
 import { NumericSpinnerInput } from '../numeric-spinner-input'
 
 type SchedulerSettingsDialogProps = {
@@ -78,32 +76,41 @@ export function SchedulerSettingsDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={t('Channel Scheduler')}
+      title={t('Advanced Scheduler')}
       description={t(
         'Same-priority failover: a channel failing consecutively is temporarily disabled, then same-priority channels are tried before falling back to lower priority.'
       )}
       contentHeight='auto'
       bodyClassName='space-y-4'
     >
-      <div className='space-y-4 py-2'>
-        <div className='flex items-center justify-between gap-2'>
+      <div className='min-w-0 space-y-4 py-2'>
+        <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
           <Tabs
             value={tab}
             onValueChange={(value) => setTab(value as PanelTab)}
+            className='min-w-0'
           >
-            <TabsList>
-              <TabsTrigger value='disabled'>
+            <TabsList className='w-full sm:w-auto'>
+              <TabsTrigger
+                className='min-w-0 flex-1 sm:flex-none'
+                value='disabled'
+              >
                 {t('Temp-Disabled Channels')}
               </TabsTrigger>
               {isRoot && (
-                <TabsTrigger value='config'>{t('Global Settings')}</TabsTrigger>
+                <TabsTrigger
+                  className='min-w-0 flex-1 sm:flex-none'
+                  value='config'
+                >
+                  {t('Global Settings')}
+                </TabsTrigger>
               )}
             </TabsList>
           </Tabs>
           <Button
             variant='link'
             size='sm'
-            className='shrink-0 px-0'
+            className='shrink-0 self-end px-0 sm:self-auto'
             render={
               <Link
                 to='/usage-logs/$section'
@@ -116,7 +123,7 @@ export function SchedulerSettingsDialog({
         </div>
 
         {tab === 'disabled' ? (
-          <DisabledChannelsPanel active={open} isRoot={isRoot} />
+          <DisabledChannelsPanel active={open} />
         ) : (
           <GlobalConfigPanel active={open && isRoot} />
         )}
@@ -125,15 +132,8 @@ export function SchedulerSettingsDialog({
   )
 }
 
-function DisabledChannelsPanel({
-  active,
-  isRoot,
-}: {
-  active: boolean
-  isRoot: boolean
-}) {
+function DisabledChannelsPanel({ active }: { active: boolean }) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
 
   const { data, isLoading } = useQuery({
     queryKey: schedulerQueryKeys.disabled(),
@@ -142,19 +142,6 @@ function DisabledChannelsPanel({
     refetchInterval: 30000,
   })
   const channels = data?.data ?? []
-
-  const restoreMutation = useMutation({
-    mutationFn: restoreSchedulerChannel,
-    onSuccess: (result) => {
-      if (result.success) {
-        toast.success(t('Channel restored'))
-        queryClient.invalidateQueries({ queryKey: schedulerQueryKeys.all })
-        queryClient.invalidateQueries({ queryKey: channelsQueryKeys.all })
-      }
-    },
-  })
-
-  const nowSeconds = Math.floor(Date.now() / 1000)
 
   if (isLoading) {
     return (
@@ -178,79 +165,60 @@ function DisabledChannelsPanel({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t('Channel')}</TableHead>
-            <TableHead>{t('Priority')}</TableHead>
-            <TableHead>{t('Reason')}</TableHead>
-            <TableHead>{t('Disabled Until')}</TableHead>
-            <TableHead>{t('Auto Recover')}</TableHead>
-            <TableHead className='text-right'>{t('Actions')}</TableHead>
+            <TableHead className='w-24'>{t('Channel')}</TableHead>
+            <TableHead className='w-20'>{t('Priority')}</TableHead>
+            <TableHead className='min-w-64'>{t('Reason')}</TableHead>
+            <TableHead className='w-48 whitespace-nowrap'>
+              {t('Disabled Until')}
+            </TableHead>
+            <TableHead className='w-24 whitespace-nowrap text-center'>
+              {t('Auto Recover')}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {channels.map((channel) => {
-            const canManualRestore =
-              isRoot &&
-              channel.manual_restore_allowed &&
-              channel.auto_disabled_until <= nowSeconds
-
-            return (
-              <TableRow key={channel.id}>
-                <TableCell>
-                  <div className='flex min-w-0 flex-col'>
-                    <span className='truncate text-xs font-medium'>
-                      {channel.name}
-                    </span>
-                    <span className='text-muted-foreground font-mono text-xs'>
-                      #{channel.id}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell className='font-mono text-xs'>
-                  {channel.priority}
-                </TableCell>
-                <TableCell className='max-w-52'>
-                  <span
-                    className='line-clamp-2 text-xs break-all'
-                    title={channel.status_reason}
-                  >
-                    {channel.status_reason || '-'}
+          {channels.map((channel) => (
+            <TableRow key={channel.id}>
+              <TableCell>
+                <div className='flex min-w-0 flex-col'>
+                  <span className='truncate text-xs font-medium'>
+                    {channel.name}
                   </span>
-                </TableCell>
-                <TableCell className='font-mono text-xs'>
-                  {formatTimestampToDate(channel.auto_disabled_until)}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      channel.scheduler_auto_recover_enabled
-                        ? 'secondary'
-                        : 'outline'
-                    }
-                    className='text-xs'
-                  >
-                    {channel.scheduler_auto_recover_enabled
-                      ? t('Enabled')
-                      : t('Disabled')}
-                  </Badge>
-                </TableCell>
-                <TableCell className='text-right'>
-                  {canManualRestore ? (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      disabled={restoreMutation.isPending}
-                      onClick={() => restoreMutation.mutate(channel.id)}
-                    >
-                      <RotateCcw className='mr-1 size-3.5' />
-                      {t('Restore')}
-                    </Button>
-                  ) : (
-                    <span className='text-muted-foreground text-xs'>-</span>
-                  )}
-                </TableCell>
-              </TableRow>
-            )
-          })}
+                  <span className='text-muted-foreground font-mono text-xs'>
+                    #{channel.id}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className='font-mono text-xs'>
+                {channel.priority}
+              </TableCell>
+              <TableCell className='min-w-64'>
+                <span
+                  className='line-clamp-2 text-xs break-all'
+                  title={channel.status_reason}
+                >
+                  {channel.status_reason || '-'}
+                </span>
+              </TableCell>
+              <TableCell className='w-48 whitespace-nowrap font-mono text-xs'>
+                {formatTimestampToDate(channel.auto_disabled_until)}
+              </TableCell>
+              <TableCell className='w-24 text-center'>
+                <Badge
+                  variant={
+                    channel.scheduler_auto_recover_enabled
+                      ? 'secondary'
+                      : 'outline'
+                  }
+                  className='text-xs'
+                >
+                  {channel.scheduler_auto_recover_enabled
+                    ? t('Enabled')
+                    : t('Disabled')}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </div>
@@ -430,8 +398,8 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
   }
 
   return (
-    <div className='space-y-4'>
-      <div className='max-h-96 space-y-4 overflow-auto pb-3 pr-1'>
+    <div className='min-w-0 space-y-4'>
+      <div className='max-h-96 min-w-0 space-y-4 overflow-x-hidden overflow-y-auto px-1 pb-3'>
         {SWITCH_FIELDS.map((field) => (
           <div
             key={field.key}
@@ -462,8 +430,9 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
               )}
             </p>
           </div>
-          <div className='flex flex-wrap items-center gap-2'>
+          <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center'>
             <NumericSpinnerInput
+              className='w-full min-w-0 justify-between sm:w-auto'
               label={t('Minimum Delay')}
               value={jitterMillisecondsToSeconds(
                 config.retry_jitter_min_ms
@@ -484,8 +453,11 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
               step={JITTER_MIN_SECONDS}
               decimalPlaces={1}
             />
-            <span className='text-muted-foreground text-xs'>-</span>
+            <span className='text-muted-foreground hidden text-xs sm:inline'>
+              -
+            </span>
             <NumericSpinnerInput
+              className='w-full min-w-0 justify-between sm:w-auto'
               label={t('Maximum Delay')}
               value={jitterMillisecondsToSeconds(
                 config.retry_jitter_max_ms
@@ -517,6 +489,7 @@ function GlobalConfigPanel({ active }: { active: boolean }) {
               {t(field.label)}
             </Label>
             <Input
+              className='w-full min-w-0'
               id={`scheduler-${field.key}`}
               type='number'
               min={field.min}

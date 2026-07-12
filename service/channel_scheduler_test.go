@@ -213,7 +213,7 @@ func TestSchedulerSessionFailoverSequence(t *testing.T) {
 	var sequence []int
 	for {
 		sequence = append(sequence, channel.Id)
-		session.RecordFailure(channel, mockUpstreamError(), true)
+		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 		next, ok := session.NextChannel()
 		if !ok {
 			break
@@ -258,8 +258,8 @@ func TestSchedulerSessionTwoFailuresNoDisable(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), true)
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 
 	reloaded := reloadChannel(t, chA.Id)
 	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
@@ -288,7 +288,7 @@ func TestSchedulerSessionAutoBanFalse(t *testing.T) {
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
 	for i := 0; i < 3; i++ {
-		session.RecordFailure(channel, mockUpstreamError(), true)
+		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 	}
 
 	reloaded := reloadChannel(t, chA.Id)
@@ -315,8 +315,8 @@ func TestSchedulerSessionIgnoreAutoBan(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), true)
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 
 	reloaded := reloadChannel(t, chA.Id)
 	assert.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
@@ -335,13 +335,50 @@ func TestSchedulerSessionNonRetryableFailure(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), false)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureStop)
 
 	reloaded := reloadChannel(t, chA.Id)
 	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
+}
+
+func TestSchedulerSessionImmediateFailoverTemporarilyDisablesChannel(t *testing.T) {
+	schedulerCleanup(t)
+	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
+		s.ChannelFailureThreshold = 3
+		s.AutoDisableSeconds = 7200
+		s.MaxAttemptsPerRequest = 12
+	})
+	chA := seedSchedulerChannel(t, seedChannelOptions{
+		id:             243,
+		name:           "A",
+		priority:       3,
+		autoBan:        1,
+		disableSeconds: common.GetPointer(600),
+	})
+	chB := seedSchedulerChannel(t, seedChannelOptions{id: 244, name: "B", priority: 3, autoBan: 1})
+
+	session := newSchedulerSessionForTest(t)
+	channel := session.AdoptInitialChannel(chA.Id)
+	require.NotNil(t, channel)
+	before := common.GetTimestamp()
+	err := types.NewOpenAIError(errors.New("gateway timeout"), types.ErrorCodeBadResponseStatusCode, 524)
+
+	session.RecordFailure(channel, err, SchedulerFailureFailoverNow)
+
+	after := common.GetTimestamp()
+	reloaded := reloadChannel(t, chA.Id)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
+	assert.GreaterOrEqual(t, reloaded.AutoDisabledUntil, before+600)
+	assert.LessOrEqual(t, reloaded.AutoDisabledUntil, after+600)
+	assert.False(t, abilityEnabled(t, chA.Id))
+	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
+
+	next, ok := session.NextChannel()
+	require.True(t, ok)
+	assert.Equal(t, chB.Id, next.Id)
 }
 
 func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) {
@@ -357,7 +394,7 @@ func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) 
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
 	err := types.NewErrorWithStatusCode(errors.New("dial tcp: connection refused"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	session.RecordFailure(channel, err, true)
+	session.RecordFailure(channel, err, SchedulerFailureFailoverWithoutDisable)
 
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chA.Id).Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
@@ -386,7 +423,7 @@ func TestSchedulerSessionMaxAttempts(t *testing.T) {
 	attempts := 0
 	for {
 		attempts++
-		session.RecordFailure(channel, mockUpstreamError(), true)
+		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 		next, ok := session.NextChannel()
 		if !ok {
 			break
@@ -416,7 +453,7 @@ func TestSchedulerSessionLowConfiguredMaxAttemptsDoesNotCutOffFailover(t *testin
 	var sequence []int
 	for {
 		sequence = append(sequence, channel.Id)
-		session.RecordFailure(channel, mockUpstreamError(), true)
+		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 		next, ok := session.NextChannel()
 		if !ok {
 			break
@@ -452,8 +489,8 @@ func TestSchedulerSessionChannelLevelOverrides(t *testing.T) {
 	require.NotNil(t, channel)
 
 	// A 阈值为 2：两次失败即禁用 600 秒
-	session.RecordFailure(channel, mockUpstreamError(), true)
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 
 	reloadedA := reloadChannel(t, chA.Id)
 	after := common.GetTimestamp()
@@ -465,10 +502,10 @@ func TestSchedulerSessionChannelLevelOverrides(t *testing.T) {
 	next, ok := session.NextChannel()
 	require.True(t, ok)
 	require.Equal(t, chB.Id, next.Id)
-	session.RecordFailure(next, mockUpstreamError(), true)
-	session.RecordFailure(next, mockUpstreamError(), true)
+	session.RecordFailure(next, mockUpstreamError(), SchedulerFailureRetryCurrent)
+	session.RecordFailure(next, mockUpstreamError(), SchedulerFailureRetryCurrent)
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chB.Id).Status)
-	session.RecordFailure(next, mockUpstreamError(), true)
+	session.RecordFailure(next, mockUpstreamError(), SchedulerFailureRetryCurrent)
 	reloadedB := reloadChannel(t, chB.Id)
 	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadedB.Status)
 	assert.GreaterOrEqual(t, reloadedB.AutoDisabledUntil, before+7200)
@@ -492,14 +529,14 @@ func TestSchedulerSessionRetrySameChannelDisabled(t *testing.T) {
 	require.NotNil(t, channel)
 
 	// A 失败一次后应换到同级 B
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 	next, ok := session.NextChannel()
 	require.True(t, ok)
 	assert.Equal(t, chB.Id, next.Id)
 
 	// B 被排除（如装配失败）后，同级仅剩 A：应继续使用 A 而不是降级或放弃
 	session.ExcludeChannel(chB.Id)
-	session.RecordFailure(chA, mockUpstreamError(), true)
+	session.RecordFailure(chA, mockUpstreamError(), SchedulerFailureRetryCurrent)
 	next, ok = session.NextChannel()
 	require.True(t, ok, "sole remaining same-priority channel must stay usable")
 	assert.Equal(t, chA.Id, next.Id)
@@ -519,7 +556,7 @@ func TestSchedulerSessionSkipsConcurrentlyDisabledCandidates(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), true) // A 达到阈值被禁用
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent) // A 达到阈值被禁用
 
 	// 模拟并发请求把 B 手动禁用（会话候选快照中的 B 状态同步变更）
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", chB.Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
@@ -578,7 +615,7 @@ func TestSchedulerSessionNoPriorityFallback(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 
 	_, ok := session.NextChannel()
 	assert.False(t, ok, "should not fall back to lower priority when disabled")
@@ -602,8 +639,8 @@ func TestSchedulerSessionFailoverWithMemoryCache(t *testing.T) {
 	session := newSchedulerSessionForTest(t)
 	channel := session.AdoptInitialChannel(chA.Id)
 	require.NotNil(t, channel)
-	session.RecordFailure(channel, mockUpstreamError(), true)
-	session.RecordFailure(channel, mockUpstreamError(), true)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
+	session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
 
 	// DB 与缓存都应看到禁用状态与到期时间
 	reloaded := reloadChannel(t, chA.Id)

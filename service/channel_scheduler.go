@@ -47,6 +47,15 @@ const (
 	schedulerMaxEffectiveAttemptsPerRequest = 10000
 )
 
+type SchedulerFailureDisposition string
+
+const (
+	SchedulerFailureStop                   SchedulerFailureDisposition = "stop"
+	SchedulerFailureRetryCurrent           SchedulerFailureDisposition = "retry_current"
+	SchedulerFailureFailoverWithoutDisable SchedulerFailureDisposition = "failover_without_disable"
+	SchedulerFailureFailoverNow            SchedulerFailureDisposition = "failover_now"
+)
+
 // ChannelSchedulerSession 单次请求的调度会话。
 // 非并发安全：一个请求内串行使用。
 type ChannelSchedulerSession struct {
@@ -306,40 +315,41 @@ func (s *ChannelSchedulerSession) ExcludeChannel(channelId int) {
 	}
 }
 
-// RecordFailure 记录一次渠道失败：
-// 1. 失败计数加一并写 failure 调度日志；
-// 2. 不可重试错误不触发禁用（请求侧错误不归因渠道）；
-// 3. 达到渠道级阈值后将渠道移出本会话候选，并按配置执行临时禁用。
-func (s *ChannelSchedulerSession) RecordFailure(channel *model.Channel, apiErr *types.NewAPIError, retryable bool) {
+// RecordFailure records the failure and applies the controller-selected disposition.
+// Threshold retries keep the current channel until its limit is reached, while
+// immediate failover skips the threshold and enters the same guarded disable path.
+func (s *ChannelSchedulerSession) RecordFailure(channel *model.Channel, apiErr *types.NewAPIError, disposition SchedulerFailureDisposition) {
 	if channel == nil {
 		return
 	}
 	s.totalAttempts++
 	s.failures[channel.Id]++
 	attemptCount := s.failures[channel.Id]
-	requestFailedWithoutUpstreamResponse := apiErr != nil && apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed
-
 	if s.setting.LogEnabled {
 		entry := s.buildLogEntry(channel, apiErr)
 		entry.EventType = model.SchedulerEventFailure
 		entry.AttemptCount = attemptCount
 		entry.Metadata = common.MapToJsonStr(map[string]interface{}{
 			"total_attempts": s.totalAttempts,
-			"retryable":      retryable,
+			"disposition":    disposition,
 		})
 		model.RecordChannelSchedulerLog(entry)
 	}
 
-	if !retryable {
+	switch disposition {
+	case SchedulerFailureStop:
 		return
-	}
-	if requestFailedWithoutUpstreamResponse {
+	case SchedulerFailureFailoverWithoutDisable:
 		s.ExcludeChannel(channel.Id)
 		return
-	}
-
-	threshold := channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
-	if attemptCount < threshold {
+	case SchedulerFailureRetryCurrent:
+		threshold := channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+		if attemptCount < threshold {
+			return
+		}
+	case SchedulerFailureFailoverNow:
+		// Continue to the shared exclusion and temporary-disable path.
+	default:
 		return
 	}
 

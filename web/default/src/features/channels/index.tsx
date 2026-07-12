@@ -46,7 +46,7 @@ function SchedulerEntryBadge() {
           <Badge
             variant='outline'
             className='shrink-0 cursor-pointer'
-            aria-label={t('Channel Scheduler')}
+            aria-label={t('Advanced Scheduler')}
             render={
               <button
                 type='button'
@@ -60,7 +60,7 @@ function SchedulerEntryBadge() {
         <Clock data-icon='inline-end' />
       </TooltipTrigger>
       <TooltipContent>
-        <p>{t('Channel Scheduler')}</p>
+        <p>{t('Advanced Scheduler')}</p>
       </TooltipContent>
     </Tooltip>
   )

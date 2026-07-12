@@ -344,9 +344,9 @@ func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo,
 		channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
 		processChannelErrorForScheduler(c, channelError, newAPIError)
 
-		retryable := shouldRetry(c, newAPIError, session.RemainingAttempts())
-		session.RecordFailure(channel, newAPIError, retryable)
-		if !retryable {
+		disposition := schedulerFailureDisposition(c, newAPIError, session.RemainingAttempts())
+		session.RecordFailure(channel, newAPIError, disposition)
+		if disposition == service.SchedulerFailureStop {
 			break
 		}
 	}
@@ -450,6 +450,44 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func schedulerFailureDisposition(c *gin.Context, apiErr *types.NewAPIError, remainingAttempts int) service.SchedulerFailureDisposition {
+	if apiErr == nil || remainingAttempts <= 0 {
+		return service.SchedulerFailureStop
+	}
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return service.SchedulerFailureStop
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) || types.IsSkipRetryError(apiErr) {
+		return service.SchedulerFailureStop
+	}
+	if c != nil {
+		if _, ok := c.Get("specific_channel_id"); ok {
+			return service.SchedulerFailureStop
+		}
+	}
+	if apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+		return service.SchedulerFailureFailoverWithoutDisable
+	}
+	if types.IsChannelError(apiErr) || apiErr.GetErrorCode() == types.ErrorCodeEmptyResponse {
+		return service.SchedulerFailureRetryCurrent
+	}
+
+	code := apiErr.StatusCode
+	if code >= 200 && code < 300 {
+		return service.SchedulerFailureStop
+	}
+	if code < 100 || code > 599 {
+		return service.SchedulerFailureRetryCurrent
+	}
+	if operation_setting.ShouldRetryByConfiguredStatusCode(code) {
+		return service.SchedulerFailureRetryCurrent
+	}
+	if code == http.StatusRequestTimeout || code == http.StatusTooManyRequests || code >= 500 {
+		return service.SchedulerFailureFailoverNow
+	}
+	return service.SchedulerFailureStop
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {

@@ -4901,6 +4901,7 @@
     "Disable Duration": "Durée de désactivation",
     "Disabled Until": "Désactivé jusqu'à",
     "Channel Path": "Chemin des canaux",
+    "Advanced Scheduler": "Planificateur avancé",
     "Channel Scheduler": "Planificateur de canaux",
     "Same-priority failover: a channel failing consecutively is temporarily disabled, then same-priority channels are tried before falling back to lower priority.": "Bascule à priorité égale : un canal en échec consécutif est désactivé temporairement, puis les canaux de même priorité sont essayés avant de descendre en priorité.",
     "Temp-Disabled Channels": "Canaux désactivés temporairement",
