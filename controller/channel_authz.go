@@ -82,12 +82,18 @@ var channelOperationalFields = map[string]struct{}{
 // channelReadOnlyFields lists server-managed/accounting fields that the general
 // channel edit endpoint must ignore even if a client sends them.
 var channelReadOnlyFields = map[string]struct{}{
-	"created_time":         {},
-	"test_time":            {},
-	"response_time":        {},
-	"balance":              {},
-	"balance_updated_time": {},
-	"used_quota":           {},
+	"created_time":                     {},
+	"test_time":                        {},
+	"response_time":                    {},
+	"balance":                          {},
+	"balance_updated_time":             {},
+	"used_quota":                       {},
+	"auto_disabled_until":              {},
+	"scheduler_enabled":                {},
+	"scheduler_retry_times":            {},
+	"scheduler_auto_disable_seconds":   {},
+	"scheduler_auto_recover_enabled":   {},
+	"scheduler_manual_restore_allowed": {},
 }
 
 func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]any) {
@@ -108,6 +114,24 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 	}
 	if _, ok := requestData["used_quota"]; ok {
 		channel.UsedQuota = 0
+	}
+	if _, ok := requestData["auto_disabled_until"]; ok {
+		channel.AutoDisabledUntil = 0
+	}
+	if _, ok := requestData["scheduler_enabled"]; ok {
+		channel.SchedulerEnabled = nil
+	}
+	if _, ok := requestData["scheduler_retry_times"]; ok {
+		channel.SchedulerRetryTimes = nil
+	}
+	if _, ok := requestData["scheduler_auto_disable_seconds"]; ok {
+		channel.SchedulerAutoDisableSeconds = nil
+	}
+	if _, ok := requestData["scheduler_auto_recover_enabled"]; ok {
+		channel.SchedulerAutoRecoverEnabled = nil
+	}
+	if _, ok := requestData["scheduler_manual_restore_allowed"]; ok {
+		channel.SchedulerManualRestoreAllowed = nil
 	}
 }
 

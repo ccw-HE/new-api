@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  Clock,
   CreditCard,
   FileText,
   FlaskConical,
@@ -88,6 +89,12 @@ export function useSidebarData(): SidebarData {
             title: t('Usage Logs'),
             url: '/usage-logs/common',
             icon: FileText,
+          },
+          {
+            title: t('Scheduler Logs'),
+            url: '/usage-logs/scheduler',
+            icon: Clock,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Task Logs'),

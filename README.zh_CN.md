@@ -52,6 +52,9 @@
 
 </div>
 
+> [!NOTE]
+> 当前仓库包含个人二开功能。详细实现机制、构建方式和上游差异请查看[二开说明](./README-FORK.md)。New API 与 QuantumNous 的原始署名保持不变。
+
 ## 📝 项目说明
 
 > [!IMPORTANT]

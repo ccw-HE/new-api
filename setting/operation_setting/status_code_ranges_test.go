@@ -68,6 +68,21 @@ func TestShouldRetryByStatusCode(t *testing.T) {
 	require.False(t, ShouldRetryByStatusCode(200))
 }
 
+func TestShouldRetryByConfiguredStatusCodeAllowsExplicitTimeoutCodes(t *testing.T) {
+	orig := AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() { AutomaticRetryStatusCodeRanges = orig })
+
+	AutomaticRetryStatusCodeRanges = []StatusCodeRange{
+		{Start: 504, End: 504},
+		{Start: 524, End: 524},
+	}
+
+	require.True(t, ShouldRetryByConfiguredStatusCode(504))
+	require.True(t, ShouldRetryByConfiguredStatusCode(524))
+	require.False(t, ShouldRetryByStatusCode(504))
+	require.False(t, ShouldRetryByStatusCode(524))
+}
+
 func TestShouldRetryByStatusCode_DefaultMatchesLegacyBehavior(t *testing.T) {
 	require.False(t, ShouldRetryByStatusCode(200))
 	require.False(t, ShouldRetryByStatusCode(400))

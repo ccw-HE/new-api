@@ -1,0 +1,500 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import { Dialog } from '@/components/dialog'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  getSchedulerDisabledChannels,
+  getSchedulerGlobalConfig,
+  schedulerQueryKeys,
+  updateSchedulerGlobalConfig,
+} from '@/features/usage-logs/scheduler/api'
+import type { SchedulerGlobalConfig } from '@/features/usage-logs/scheduler/types'
+import { formatTimestampToDate } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
+import { NumericSpinnerInput } from '../numeric-spinner-input'
+
+type SchedulerSettingsDialogProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+type PanelTab = 'disabled' | 'config'
+
+export function SchedulerSettingsDialog({
+  open,
+  onOpenChange,
+}: SchedulerSettingsDialogProps) {
+  const { t } = useTranslation()
+  const isRoot = useAuthStore(
+    (state) => (state.auth.user?.role ?? 0) >= ROLE.SUPER_ADMIN
+  )
+  const [tab, setTab] = useState<PanelTab>('disabled')
+
+  useEffect(() => {
+    if (!open) setTab('disabled')
+  }, [open])
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t('Advanced Scheduler')}
+      description={t(
+        'Same-priority failover: a channel failing consecutively is temporarily disabled, then same-priority channels are tried before falling back to lower priority.'
+      )}
+      contentHeight='auto'
+      bodyClassName='space-y-4'
+    >
+      <div className='min-w-0 space-y-4 py-2'>
+        <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as PanelTab)}
+            className='min-w-0'
+          >
+            <TabsList className='w-full sm:w-auto'>
+              <TabsTrigger
+                className='min-w-0 flex-1 sm:flex-none'
+                value='disabled'
+              >
+                {t('Temp-Disabled Channels')}
+              </TabsTrigger>
+              {isRoot && (
+                <TabsTrigger
+                  className='min-w-0 flex-1 sm:flex-none'
+                  value='config'
+                >
+                  {t('Global Settings')}
+                </TabsTrigger>
+              )}
+            </TabsList>
+          </Tabs>
+          <Button
+            variant='link'
+            size='sm'
+            className='shrink-0 self-end px-0 sm:self-auto'
+            render={
+              <Link
+                to='/usage-logs/$section'
+                params={{ section: 'scheduler' }}
+              />
+            }
+          >
+            {t('View Scheduler Logs')}
+          </Button>
+        </div>
+
+        {tab === 'disabled' ? (
+          <DisabledChannelsPanel active={open} />
+        ) : (
+          <GlobalConfigPanel active={open && isRoot} />
+        )}
+      </div>
+    </Dialog>
+  )
+}
+
+function DisabledChannelsPanel({ active }: { active: boolean }) {
+  const { t } = useTranslation()
+
+  const { data, isLoading } = useQuery({
+    queryKey: schedulerQueryKeys.disabled(),
+    queryFn: getSchedulerDisabledChannels,
+    enabled: active,
+    refetchInterval: 30000,
+  })
+  const channels = data?.data ?? []
+
+  if (isLoading) {
+    return (
+      <div className='text-muted-foreground flex items-center gap-2 py-8 text-sm'>
+        <Loader2 className='size-4 animate-spin' />
+        {t('Loading...')}
+      </div>
+    )
+  }
+
+  if (channels.length === 0) {
+    return (
+      <p className='text-muted-foreground py-8 text-center text-sm'>
+        {t('No channels are currently temporarily disabled by the scheduler.')}
+      </p>
+    )
+  }
+
+  return (
+    <div className='max-h-96 overflow-auto rounded-md border'>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className='w-24'>{t('Channel')}</TableHead>
+            <TableHead className='w-20'>{t('Priority')}</TableHead>
+            <TableHead className='min-w-64'>{t('Reason')}</TableHead>
+            <TableHead className='w-48 whitespace-nowrap'>
+              {t('Disabled Until')}
+            </TableHead>
+            <TableHead className='w-24 text-center whitespace-nowrap'>
+              {t('Auto Recover')}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {channels.map((channel) => (
+            <TableRow key={channel.id}>
+              <TableCell>
+                <div className='flex min-w-0 flex-col'>
+                  <span className='truncate text-xs font-medium'>
+                    {channel.name}
+                  </span>
+                  <span className='text-muted-foreground font-mono text-xs'>
+                    #{channel.id}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className='font-mono text-xs'>
+                {channel.priority}
+              </TableCell>
+              <TableCell className='min-w-64'>
+                <span
+                  className='line-clamp-2 text-xs break-all'
+                  title={channel.status_reason}
+                >
+                  {channel.status_reason || '-'}
+                </span>
+              </TableCell>
+              <TableCell className='w-48 font-mono text-xs whitespace-nowrap'>
+                {formatTimestampToDate(channel.auto_disabled_until)}
+              </TableCell>
+              <TableCell className='w-24 text-center'>
+                <Badge
+                  variant={
+                    channel.scheduler_auto_recover_enabled
+                      ? 'secondary'
+                      : 'outline'
+                  }
+                  className='text-xs'
+                >
+                  {channel.scheduler_auto_recover_enabled
+                    ? t('Enabled')
+                    : t('Disabled')}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+const SWITCH_FIELDS: Array<{
+  key: keyof SchedulerGlobalConfig
+  label: string
+  description: string
+}> = [
+  {
+    key: 'enabled',
+    label: 'Enable Advanced Scheduler',
+    description:
+      'Master switch. When off, the legacy retry behavior is used unchanged.',
+  },
+  {
+    key: 'log_enabled',
+    label: 'Scheduler Logging',
+    description: 'Write independent scheduler logs for failures and disables.',
+  },
+  {
+    key: 'retry_same_channel',
+    label: 'Retry Same Channel',
+    description:
+      'Keep retrying the same channel until its failure threshold is reached.',
+  },
+  {
+    key: 'allow_priority_fallback',
+    label: 'Priority Fallback',
+    description:
+      'Fall back to lower priority channels after the current priority is exhausted.',
+  },
+  {
+    key: 'respect_auto_ban',
+    label: 'Respect Channel Auto-Ban Switch',
+    description:
+      'Channels with auto-ban off are excluded from this request but never temporarily disabled.',
+  },
+]
+
+const NUMBER_FIELDS: Array<{
+  key: 'channel_failure_threshold' | 'auto_disable_seconds'
+  label: string
+  description: string
+  min: number
+  max: number
+}> = [
+  {
+    key: 'channel_failure_threshold',
+    label: 'Failure Threshold',
+    description:
+      'Consecutive failures before a channel is temporarily disabled (per-channel override available).',
+    min: 1,
+    max: 100,
+  },
+  {
+    key: 'auto_disable_seconds',
+    label: 'Auto Disable Seconds',
+    description:
+      'Temporary disable duration in seconds. Default 7200 (2 hours).',
+    min: 1,
+    max: 2592000,
+  },
+]
+
+const JITTER_MIN_SECONDS = 0.1
+const JITTER_MAX_SECONDS = 10
+
+function jitterMillisecondsToSeconds(value: number | undefined) {
+  return Number(((value ?? 0) / 1000).toFixed(1))
+}
+
+function jitterSecondsToMilliseconds(value: number) {
+  return Math.round(value * 1000)
+}
+
+function GlobalConfigPanel({ active }: { active: boolean }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [config, setConfig] = useState<SchedulerGlobalConfig | null>(null)
+  const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
+
+  const { data, isLoading } = useQuery({
+    queryKey: schedulerQueryKeys.globalConfig(),
+    queryFn: getSchedulerGlobalConfig,
+    enabled: active,
+  })
+
+  useEffect(() => {
+    if (data?.success && data.data) {
+      setConfig({
+        ...data.data,
+        retry_jitter_min_ms: data.data.retry_jitter_min_ms ?? 0,
+        retry_jitter_max_ms: data.data.retry_jitter_max_ms ?? 0,
+      })
+      setNumberDrafts({
+        channel_failure_threshold: String(data.data.channel_failure_threshold),
+        auto_disable_seconds: String(data.data.auto_disable_seconds),
+      })
+    }
+  }, [data])
+
+  const saveMutation = useMutation({
+    mutationFn: updateSchedulerGlobalConfig,
+    onSuccess: (result) => {
+      if (result.success) {
+        toast.success(t('Scheduler settings saved'))
+        queryClient.invalidateQueries({
+          queryKey: schedulerQueryKeys.globalConfig(),
+        })
+      }
+    },
+  })
+
+  const handleSave = () => {
+    if (!config) return
+    const parsed: Record<string, number> = {}
+    for (const field of NUMBER_FIELDS) {
+      const raw = (numberDrafts[field.key] ?? '').trim()
+      const value = Number(raw)
+      if (
+        raw === '' ||
+        Number.isNaN(value) ||
+        value < field.min ||
+        value > field.max
+      ) {
+        toast.error(
+          `${t(field.label)}: ${t('must be a number between')} ${field.min} - ${field.max}`
+        )
+        return
+      }
+      parsed[field.key] = value
+    }
+    const jitterMinMs = config.retry_jitter_min_ms
+    const jitterMaxMs = config.retry_jitter_max_ms
+    const jitterDisabled = jitterMinMs === 0 && jitterMaxMs === 0
+    const jitterValid =
+      jitterDisabled ||
+      (jitterMinMs >= 100 && jitterMaxMs <= 10000 && jitterMinMs <= jitterMaxMs)
+    if (!jitterValid) {
+      toast.error(
+        `${t('Retry Jitter')}: ${t('must be 0/0 or between 0.1 and 10 seconds')}`
+      )
+      return
+    }
+    saveMutation.mutate({
+      ...config,
+      channel_failure_threshold: parsed.channel_failure_threshold,
+      auto_disable_seconds: parsed.auto_disable_seconds,
+    })
+  }
+
+  if (isLoading || !config) {
+    return (
+      <div className='text-muted-foreground flex items-center gap-2 py-8 text-sm'>
+        <Loader2 className='size-4 animate-spin' />
+        {t('Loading...')}
+      </div>
+    )
+  }
+
+  return (
+    <div className='min-w-0 space-y-4'>
+      <div className='max-h-96 min-w-0 space-y-4 overflow-x-hidden overflow-y-auto px-1 pb-3'>
+        {SWITCH_FIELDS.map((field) => (
+          <div
+            key={field.key}
+            className='flex items-start justify-between gap-4'
+          >
+            <div className='min-w-0 space-y-0.5'>
+              <Label className='text-sm'>{t(field.label)}</Label>
+              <p className='text-muted-foreground text-xs'>
+                {t(field.description)}
+              </p>
+            </div>
+            <Switch
+              checked={Boolean(config[field.key])}
+              onCheckedChange={(checked) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, [field.key]: checked } : prev
+                )
+              }
+            />
+          </div>
+        ))}
+        <div className='space-y-2'>
+          <div className='space-y-0.5'>
+            <Label className='text-sm'>{t('Retry Jitter')}</Label>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Random delay before each scheduler retry. Set both values to 0 to disable.'
+              )}
+            </p>
+          </div>
+          <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center'>
+            <NumericSpinnerInput
+              className='w-full min-w-0 justify-between sm:w-auto'
+              label={t('Minimum Delay')}
+              value={jitterMillisecondsToSeconds(config.retry_jitter_min_ms)}
+              onChange={(value) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        retry_jitter_min_ms: jitterSecondsToMilliseconds(value),
+                      }
+                    : prev
+                )
+              }
+              min={0}
+              max={JITTER_MAX_SECONDS}
+              step={JITTER_MIN_SECONDS}
+              decimalPlaces={1}
+            />
+            <span className='text-muted-foreground hidden text-xs sm:inline'>
+              -
+            </span>
+            <NumericSpinnerInput
+              className='w-full min-w-0 justify-between sm:w-auto'
+              label={t('Maximum Delay')}
+              value={jitterMillisecondsToSeconds(config.retry_jitter_max_ms)}
+              onChange={(value) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        retry_jitter_max_ms: jitterSecondsToMilliseconds(value),
+                      }
+                    : prev
+                )
+              }
+              min={0}
+              max={JITTER_MAX_SECONDS}
+              step={JITTER_MIN_SECONDS}
+              decimalPlaces={1}
+            />
+            <span className='text-muted-foreground text-xs'>
+              {t('seconds')}
+            </span>
+          </div>
+        </div>
+        {NUMBER_FIELDS.map((field) => (
+          <div key={field.key} className='space-y-1'>
+            <Label className='text-sm' htmlFor={`scheduler-${field.key}`}>
+              {t(field.label)}
+            </Label>
+            <Input
+              className='w-full min-w-0'
+              id={`scheduler-${field.key}`}
+              type='number'
+              min={field.min}
+              max={field.max}
+              value={numberDrafts[field.key] ?? ''}
+              onChange={(e) =>
+                setNumberDrafts((prev) => ({
+                  ...prev,
+                  [field.key]: e.target.value,
+                }))
+              }
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(field.description)}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className='flex justify-end'>
+        <Button onClick={handleSave} disabled={saveMutation.isPending}>
+          {saveMutation.isPending && (
+            <Loader2 className='mr-2 size-4 animate-spin' />
+          )}
+          {t('Save Scheduler Settings')}
+        </Button>
+      </div>
+    </div>
+  )
+}

@@ -22,6 +22,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(schedulerRecoverHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -150,6 +151,30 @@ func (asyncTaskPollHandler) NewPayload() any { return nil }
 func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary := service.RunTaskPollingOnce(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+// schedulerRecoverHandler runs shared scheduler maintenance for expired channel recovery.
+type schedulerRecoverHandler struct{}
+
+func (schedulerRecoverHandler) Type() string { return model.SystemTaskTypeSchedulerRecover }
+
+func (schedulerRecoverHandler) Enabled() bool {
+	return model.HasSchedulerTempDisabledChannels()
+}
+
+func (schedulerRecoverHandler) Interval() time.Duration { return time.Minute }
+
+func (schedulerRecoverHandler) NewPayload() any { return nil }
+
+func (schedulerRecoverHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	recovered, err := service.RecoverExpiredSchedulerChannels()
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, map[string]any{
+		"recovered": recovered,
+	}, nil)
 }
 
 func finishSystemTaskHandler(task *model.SystemTask, runnerID string, status model.SystemTaskStatus, result any, runErr error) {

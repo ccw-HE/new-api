@@ -902,7 +902,12 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
-	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
+	if strings.EqualFold(claudeResponse.StopReason, "refusal") {
+		return service.NewUpstreamContentBlockedError(c, "claude_stop_reason=refusal")
+	}
+	if !service.HasClaudeDeliverable(&claudeResponse) {
+		return service.NewEmptyResponseError("claude", "no text, thinking, or tool use")
+	}
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}

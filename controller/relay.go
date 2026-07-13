@@ -188,51 +188,54 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
-		relayInfo.RetryIndex = retryParam.GetRetry()
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
-		if channelErr != nil {
-			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
-			break
+	useScheduler := false
+	var schedulerSession *service.ChannelSchedulerSession
+	if service.ShouldUseChannelScheduler(c, relayInfo.IsStream) {
+		session, sessionErr := service.NewChannelSchedulerSession(c, relayInfo.TokenGroup, relayInfo.OriginModelName, c.Request.URL.Path)
+		if sessionErr != nil {
+			// 候选加载失败时降级走旧调度逻辑，不影响本次请求
+			logger.LogError(c, fmt.Sprintf("channel scheduler: load candidates failed, fallback to legacy retry: %s", sessionErr.Error()))
+		} else {
+			schedulerSession = session
+			useScheduler = true
 		}
+	}
 
-		addUsedChannel(c, channel.Id)
-		bodyStorage, bodyErr := common.GetBodyStorage(c)
-		if bodyErr != nil {
-			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
-			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
-			} else {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	if useScheduler {
+		newAPIError = relayWithChannelScheduler(c, relayInfo, relayFormat, schedulerSession)
+	} else {
+		for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+			relayInfo.RetryIndex = retryParam.GetRetry()
+			channel, channelErr := getChannel(c, relayInfo, retryParam)
+			if channelErr != nil {
+				logger.LogError(c, channelErr.Error())
+				newAPIError = channelErr
+				break
 			}
-			break
-		}
-		c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
-		}
+			addUsedChannel(c, channel.Id)
+			if bodyErr := rewindRequestBody(c); bodyErr != nil {
+				newAPIError = bodyErr
+				break
+			}
 
-		if newAPIError == nil {
-			relayInfo.LastError = nil
-			return
-		}
+			resetRelayAttemptState(c)
+			newAPIError = dispatchRelay(c, relayInfo, relayFormat)
 
-		newAPIError = service.NormalizeViolationFeeError(newAPIError)
-		relayInfo.LastError = newAPIError
+			if newAPIError == nil {
+				relayInfo.LastError = nil
+				return
+			}
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			newAPIError = service.NormalizeViolationFeeError(newAPIError)
+			relayInfo.LastError = newAPIError
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
-			break
+			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
+			processChannelError(c, channelError, newAPIError)
+
+			if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+				break
+			}
 		}
 	}
 
@@ -259,6 +262,97 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+// rewindRequestBody 每次尝试前重置请求体，超大请求体统一映射为 413。
+func rewindRequestBody(c *gin.Context) *types.NewAPIError {
+	bodyStorage, bodyErr := common.GetBodyStorage(c)
+	if bodyErr != nil {
+		// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
+		if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+			return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+		}
+		return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	c.Request.Body = io.NopCloser(bodyStorage)
+	return nil
+}
+
+// dispatchRelay 按 relayFormat 分发到对应 relay handler，执行一次上游请求。
+func dispatchRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat) *types.NewAPIError {
+	switch relayFormat {
+	case types.RelayFormatOpenAIRealtime:
+		return relay.WssHelper(c, relayInfo)
+	case types.RelayFormatClaude:
+		return relay.ClaudeHelper(c, relayInfo)
+	case types.RelayFormatGemini:
+		return geminiRelayHandler(c, relayInfo)
+	default:
+		return relayHandler(c, relayInfo)
+	}
+}
+
+// relayWithChannelScheduler 高级调度器接管的重试循环：
+// 同渠道连续重试到阈值 -> 临时禁用并移出候选 -> 同优先级换渠道 -> 同级耗尽后降级。
+// 首个渠道沿用 middleware.Distribute 的选择结果并纳入会话计数；
+// 阈值临时禁用由会话统一执行，不走旧的"失败立即禁用"路径。
+func relayWithChannelScheduler(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat, session *service.ChannelSchedulerSession) *types.NewAPIError {
+	var newAPIError *types.NewAPIError
+	for attempt := 0; ; attempt++ {
+		var channel *model.Channel
+		if attempt == 0 {
+			channel = session.AdoptInitialChannel(c.GetInt("channel_id"))
+			if channel == nil {
+				return types.NewError(fmt.Errorf("分组 %s 下模型 %s 的首选渠道已不可用", session.CurrentGroup(), relayInfo.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			}
+		} else {
+			nextChannel, ok := session.NextChannel()
+			if !ok {
+				break
+			}
+			channel = nextChannel
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+				// 渠道上下文装配失败（如多 key 渠道无可用 key）：排除该渠道换下一个
+				logger.LogError(c, fmt.Sprintf("channel scheduler: setup channel #%d failed: %s", channel.Id, setupErr.Error()))
+				session.ExcludeChannel(channel.Id)
+				newAPIError = setupErr
+				continue
+			}
+			relayInfo.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, relayInfo)
+		}
+
+		if attempt > 0 {
+			if jitterErr := session.WaitBeforeRetry(); jitterErr != nil {
+				return jitterErr
+			}
+		}
+		relayInfo.RetryIndex = attempt
+		addUsedChannel(c, channel.Id)
+		if bodyErr := rewindRequestBody(c); bodyErr != nil {
+			return bodyErr
+		}
+
+		relayInfo.DetectEmptyResponseForScheduler = true
+		resetRelayAttemptState(c)
+		newAPIError = dispatchRelay(c, relayInfo, relayFormat)
+		if newAPIError == nil {
+			relayInfo.LastError = nil
+			return nil
+		}
+
+		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		relayInfo.LastError = newAPIError
+
+		channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
+		processChannelErrorForScheduler(c, channelError, newAPIError)
+
+		disposition := schedulerFailureDisposition(c, newAPIError, session.RemainingAttempts())
+		session.RecordFailure(channel, newAPIError, disposition)
+		if disposition == service.SchedulerFailureStop {
+			break
+		}
+	}
+	return newAPIError
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -326,6 +420,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
@@ -341,6 +438,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
+	if openaiErr.GetErrorCode() == types.ErrorCodeEmptyResponse {
+		return true
+	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {
 		return false
@@ -354,16 +454,88 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
+func schedulerFailureDisposition(c *gin.Context, apiErr *types.NewAPIError, remainingAttempts int) service.SchedulerFailureDisposition {
+	if apiErr == nil || remainingAttempts <= 0 {
+		return service.SchedulerFailureStop
+	}
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return service.SchedulerFailureStop
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) || types.IsSkipRetryError(apiErr) {
+		return service.SchedulerFailureStop
+	}
+	if c != nil {
+		if _, ok := c.Get("specific_channel_id"); ok {
+			return service.SchedulerFailureStop
+		}
+	}
+	if apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+		return service.SchedulerFailureFailoverWithoutDisable
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked) {
+		return service.SchedulerFailureFailoverWithoutDisable
+	}
+	if types.IsChannelError(apiErr) || apiErr.GetErrorCode() == types.ErrorCodeEmptyResponse {
+		return service.SchedulerFailureRetryCurrent
+	}
+
+	code := apiErr.StatusCode
+	if code >= 200 && code < 300 {
+		return service.SchedulerFailureStop
+	}
+	if code < 100 || code > 599 {
+		return service.SchedulerFailureRetryCurrent
+	}
+	if operation_setting.ShouldRetryByConfiguredStatusCode(code) {
+		return service.SchedulerFailureRetryCurrent
+	}
+	if code == http.StatusRequestTimeout || code == http.StatusTooManyRequests || code >= 500 {
+		return service.SchedulerFailureFailoverNow
+	}
+	return service.SchedulerFailureStop
+}
+
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if shouldDisableChannelForRelay(c, err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
 
+	recordRelayErrorLog(c, err)
+}
+
+// processChannelErrorForScheduler 高级调度器接管时的失败处理：
+// 渠道级禁用由调度会话在达到阈值后统一执行（临时禁用），不走旧的
+// "符合禁用条件立即禁用"路径，否则会破坏"连续失败 N 次再禁用"语义。
+// 多 Key 渠道保留旧的 Key 级禁用能力：只禁用出错的 Key，渠道继续用
+// 其余 Key 服务；全部 Key 禁用后渠道进入旧式 auto disabled（无到期时间）。
+func processChannelErrorForScheduler(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	if channelError.UsingKey != "" && channelError.IsMultiKey && channelError.AutoBan && shouldDisableChannelForRelay(c, err) {
+		gopool.Go(func() {
+			service.DisableChannel(channelError, err.ErrorWithStatusCode())
+		})
+	}
+	recordRelayErrorLog(c, err)
+}
+
+func shouldDisableChannelForRelay(c *gin.Context, err *types.NewAPIError) bool {
+	if common.GetContextKeyBool(c, constant.ContextKeyUpstreamContentBlocked) {
+		return false
+	}
+	return service.ShouldDisableChannel(err)
+}
+
+func resetRelayAttemptState(c *gin.Context) {
+	common.SetContextKey(c, constant.ContextKeyUpstreamContentBlocked, false)
+	common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "")
+}
+
+func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
 		// 保存错误日志到mysql中
 		userId := c.GetInt("id")

@@ -97,26 +97,43 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 }
 
 func TestClearChannelReadOnlyFields(t *testing.T) {
+	schedulerEnabled := true
+	schedulerRetryTimes := 5
+	schedulerAutoDisableSeconds := 3600
+	schedulerAutoRecoverEnabled := false
+	schedulerManualRestoreAllowed := false
 	channel := PatchChannel{Channel: model.Channel{
-		CreatedTime:        11,
-		TestTime:           22,
-		ResponseTime:       33,
-		Balance:            44.5,
-		BalanceUpdatedTime: 55,
-		UsedQuota:          66,
-		Models:             "gpt-4o",
-		Group:              "default",
+		CreatedTime:                   11,
+		TestTime:                      22,
+		ResponseTime:                  33,
+		Balance:                       44.5,
+		BalanceUpdatedTime:            55,
+		UsedQuota:                     66,
+		AutoDisabledUntil:             77,
+		SchedulerEnabled:              &schedulerEnabled,
+		SchedulerRetryTimes:           &schedulerRetryTimes,
+		SchedulerAutoDisableSeconds:   &schedulerAutoDisableSeconds,
+		SchedulerAutoRecoverEnabled:   &schedulerAutoRecoverEnabled,
+		SchedulerManualRestoreAllowed: &schedulerManualRestoreAllowed,
+		Models:                        "gpt-4o",
+		Group:                         "default",
 	}}
 
 	clearChannelReadOnlyFields(&channel, map[string]any{
-		"created_time":         channel.CreatedTime,
-		"test_time":            channel.TestTime,
-		"response_time":        channel.ResponseTime,
-		"balance":              channel.Balance,
-		"balance_updated_time": channel.BalanceUpdatedTime,
-		"used_quota":           channel.UsedQuota,
-		"models":               channel.Models,
-		"group":                channel.Group,
+		"created_time":                     channel.CreatedTime,
+		"test_time":                        channel.TestTime,
+		"response_time":                    channel.ResponseTime,
+		"balance":                          channel.Balance,
+		"balance_updated_time":             channel.BalanceUpdatedTime,
+		"used_quota":                       channel.UsedQuota,
+		"auto_disabled_until":              channel.AutoDisabledUntil,
+		"scheduler_enabled":                channel.SchedulerEnabled,
+		"scheduler_retry_times":            channel.SchedulerRetryTimes,
+		"scheduler_auto_disable_seconds":   channel.SchedulerAutoDisableSeconds,
+		"scheduler_auto_recover_enabled":   channel.SchedulerAutoRecoverEnabled,
+		"scheduler_manual_restore_allowed": channel.SchedulerManualRestoreAllowed,
+		"models":                           channel.Models,
+		"group":                            channel.Group,
 	})
 
 	assert.Zero(t, channel.CreatedTime)
@@ -125,6 +142,12 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 	assert.Zero(t, channel.Balance)
 	assert.Zero(t, channel.BalanceUpdatedTime)
 	assert.Zero(t, channel.UsedQuota)
+	assert.Zero(t, channel.AutoDisabledUntil)
+	assert.Nil(t, channel.SchedulerEnabled)
+	assert.Nil(t, channel.SchedulerRetryTimes)
+	assert.Nil(t, channel.SchedulerAutoDisableSeconds)
+	assert.Nil(t, channel.SchedulerAutoRecoverEnabled)
+	assert.Nil(t, channel.SchedulerManualRestoreAllowed)
 	assert.Equal(t, "gpt-4o", channel.Models)
 	assert.Equal(t, "default", channel.Group)
 }

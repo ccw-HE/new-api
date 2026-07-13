@@ -74,7 +74,13 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { LogCleanupTask } from '../types'
+import {
+  getDefaultLogCleanupDate,
+  getLogCleanupDateDaysAgo,
+  getLogCleanupDateHoursAgo,
+  getLogCleanupTargetTimestamp,
+} from './log-cleanup-time'
+import type { LogCleanupTask, LogCleanupType } from '../types'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
@@ -95,7 +101,13 @@ type ServerLogInfo = {
   newest_time?: string
 }
 
-const HOURS_IN_DAY = 24
+const historyLogTypeOptions = [
+  { value: 'usage', label: 'Usage Logs' },
+  { value: 'scheduler', label: 'Scheduler Logs' },
+] as const satisfies ReadonlyArray<{
+  value: LogCleanupType
+  label: string
+}>
 
 function formatBytes(bytes: number, decimals = 2): string {
   if (!bytes || Number.isNaN(bytes)) return '0 Bytes'
@@ -110,26 +122,18 @@ function formatBytes(bytes: number, decimals = 2): string {
   }`
 }
 
-const getDateHoursAgo = (hours: number) => {
-  const date = new Date()
-  date.setHours(date.getHours() - hours)
-  return date
-}
-
-const getDateDaysAgo = (days: number) => getDateHoursAgo(days * HOURS_IN_DAY)
-
 const quickSelectOptions = [
   {
     label: '24 hours ago',
-    getValue: () => getDateHoursAgo(24),
+    getValue: () => getLogCleanupDateHoursAgo(24),
   },
   {
     label: '7 days ago',
-    getValue: () => getDateDaysAgo(7),
+    getValue: () => getLogCleanupDateDaysAgo(7),
   },
   {
     label: '30 days ago',
-    getValue: () => getDateDaysAgo(30),
+    getValue: () => getLogCleanupDateDaysAgo(30),
   },
 ]
 
@@ -150,7 +154,7 @@ export function LogSettingsSection({
   })
 
   const [purgeDate, setPurgeDate] = useState<Date | undefined>(() =>
-    getDateDaysAgo(30)
+    getDefaultLogCleanupDate()
   )
   const [isStartingLogCleanup, setIsStartingLogCleanup] = useState(false)
   const [logCleanupTask, setLogCleanupTask] = useState<LogCleanupTask | null>(
@@ -162,6 +166,8 @@ export function LogSettingsSection({
   )
   const [serverLogCleanupMode, setServerLogCleanupMode] = useState('by_count')
   const [serverLogCleanupValue, setServerLogCleanupValue] = useState(10)
+  const [historyLogCleanupType, setHistoryLogCleanupType] =
+    useState<LogCleanupType>('usage')
   const [serverLogCleanupLoading, setServerLogCleanupLoading] = useState(false)
 
   const fetchServerLogInfo = useCallback(async () => {
@@ -203,8 +209,7 @@ export function LogSettingsSection({
   }, [])
 
   const purgeTimestamp = useMemo(() => {
-    if (!purgeDate) return null
-    return Math.floor(purgeDate.getTime() / 1000)
+    return getLogCleanupTargetTimestamp(purgeDate)
   }, [purgeDate])
 
   const formattedPurgeDate = useMemo(() => {
@@ -220,6 +225,12 @@ export function LogSettingsSection({
   )
   const logCleanupProcessed = logCleanupState?.processed ?? 0
   const logCleanupTotal = logCleanupState?.total ?? 0
+  const historyLogCleanupTypeLabel = useMemo(() => {
+    const option = historyLogTypeOptions.find(
+      (item) => item.value === historyLogCleanupType
+    )
+    return t(option?.label ?? 'Usage Logs')
+  }, [historyLogCleanupType, t])
   const logCleanupTaskId = logCleanupTask?.task_id
 
   useEffect(() => {
@@ -281,7 +292,10 @@ export function LogSettingsSection({
 
     setIsStartingLogCleanup(true)
     try {
-      const res = await startLogCleanupTask(purgeTimestamp)
+      const res = await startLogCleanupTask(
+        purgeTimestamp,
+        historyLogCleanupType
+      )
       if (!res.success) {
         throw new Error(res.message || t('Failed to clean logs'))
       }
@@ -312,8 +326,12 @@ export function LogSettingsSection({
 
     setServerLogCleanupLoading(true)
     try {
+      const params = new URLSearchParams({
+        mode: serverLogCleanupMode,
+        value: String(serverLogCleanupValue),
+      })
       const res = await api.delete(
-        `/api/performance/logs?mode=${serverLogCleanupMode}&value=${serverLogCleanupValue}`
+        `/api/performance/logs?${params.toString()}`
       )
       if (res.data.success) {
         const { deleted_count, freed_bytes } = res.data.data
@@ -376,8 +394,43 @@ export function LogSettingsSection({
                 )}
               </p>
             </div>
-            <DateTimePicker value={purgeDate} onChange={setPurgeDate} />
-            <div className='flex flex-wrap gap-3'>
+            <DateTimePicker
+              value={purgeDate}
+              onChange={setPurgeDate}
+              displayFormat='YYYY-MM-DD HH:mm'
+            />
+            <div className='flex flex-wrap items-end gap-3'>
+              <div className='grid w-[100px] gap-1.5'>
+                <Label className='text-xs'>{t('Log Type')}</Label>
+                <Select
+                  items={historyLogTypeOptions.map((option) => ({
+                    value: option.value,
+                    label: t(option.label),
+                  }))}
+                  value={historyLogCleanupType}
+                  onValueChange={(value) => {
+                    if (value === 'usage' || value === 'scheduler') {
+                      setHistoryLogCleanupType(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger className='w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className='min-w-[100px]'
+                  >
+                    <SelectGroup>
+                      {historyLogTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.label)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
               {quickSelectOptions.map((option) => (
                 <Button
                   key={option.label}
@@ -396,7 +449,9 @@ export function LogSettingsSection({
               >
                 {isStartingLogCleanup || logCleanupActive
                   ? t('Cleaning...')
-                  : t('Clean logs')}
+                  : t('Clean {{type}}', {
+                      type: historyLogCleanupTypeLabel,
+                    })}
               </Button>
             </div>
             {logCleanupTask && (
@@ -588,11 +643,15 @@ export function LogSettingsSection({
             <AlertDialogDescription>
               {formattedPurgeDate
                 ? t(
-                    'This will permanently remove all log entries created before {{date}}.',
-                    { date: formattedPurgeDate }
+                    'This will permanently remove {{type}} entries created before {{date}}.',
+                    {
+                      date: formattedPurgeDate,
+                      type: historyLogCleanupTypeLabel,
+                    }
                   )
                 : t(
-                    'This will permanently remove log entries before the selected timestamp.'
+                    'This will permanently remove {{type}} entries before the selected timestamp.',
+                    { type: historyLogCleanupTypeLabel }
                   )}{' '}
               {t('This action cannot be undone.')}
             </AlertDialogDescription>
@@ -606,7 +665,11 @@ export function LogSettingsSection({
               onClick={handleCleanLogs}
               disabled={isStartingLogCleanup}
             >
-              {isStartingLogCleanup ? t('Cleaning...') : t('Delete logs')}
+              {isStartingLogCleanup
+                ? t('Cleaning...')
+                : t('Delete {{type}}', {
+                    type: historyLogCleanupTypeLabel,
+                  })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

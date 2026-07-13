@@ -53,6 +53,16 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
+	// 高级调度器字段。AutoDisabledUntil 为调度器临时禁用的到期时间戳（秒），
+	// 0 表示不处于调度器临时禁用状态（旧式 auto disabled 渠道保持 0，不会被自动恢复）。
+	// 渠道级调度配置全部使用指针：nil 表示继承全局默认，避免把 0 同时当作"关闭"和"未设置"。
+	AutoDisabledUntil             int64 `json:"auto_disabled_until" gorm:"bigint;default:0;index"`
+	SchedulerEnabled              *bool `json:"scheduler_enabled"`
+	SchedulerRetryTimes           *int  `json:"scheduler_retry_times"`
+	SchedulerAutoDisableSeconds   *int  `json:"scheduler_auto_disable_seconds"`
+	SchedulerAutoRecoverEnabled   *bool `json:"scheduler_auto_recover_enabled"`
+	SchedulerManualRestoreAllowed *bool `json:"scheduler_manual_restore_allowed"`
+
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
 	// cache info
@@ -342,6 +352,48 @@ func (channel *Channel) GetAutoBan() bool {
 	return *channel.AutoBan == 1
 }
 
+// GetSchedulerEnabled 该渠道是否参与高级调度，nil 表示继承默认（参与）。
+func (channel *Channel) GetSchedulerEnabled() bool {
+	if channel.SchedulerEnabled == nil {
+		return true
+	}
+	return *channel.SchedulerEnabled
+}
+
+// GetSchedulerAutoRecoverEnabled 临时禁用到期后是否允许自动恢复，nil 表示允许。
+func (channel *Channel) GetSchedulerAutoRecoverEnabled() bool {
+	if channel.SchedulerAutoRecoverEnabled == nil {
+		return true
+	}
+	return *channel.SchedulerAutoRecoverEnabled
+}
+
+// GetSchedulerManualRestoreAllowed 是否允许管理员手动恢复，nil 表示允许。
+func (channel *Channel) GetSchedulerManualRestoreAllowed() bool {
+	if channel.SchedulerManualRestoreAllowed == nil {
+		return true
+	}
+	return *channel.SchedulerManualRestoreAllowed
+}
+
+const maxChannelSchedulerRetryTimes = 100
+
+// ResolveSchedulerRetryTimes 渠道级连续失败阈值；nil 或非法值回退到全局默认。
+func (channel *Channel) ResolveSchedulerRetryTimes(globalDefault int) int {
+	if channel.SchedulerRetryTimes == nil || *channel.SchedulerRetryTimes <= 0 || *channel.SchedulerRetryTimes > maxChannelSchedulerRetryTimes {
+		return globalDefault
+	}
+	return *channel.SchedulerRetryTimes
+}
+
+// ResolveSchedulerAutoDisableSeconds 渠道级临时禁用时长；nil 或非法值回退到全局默认。
+func (channel *Channel) ResolveSchedulerAutoDisableSeconds(globalDefault int) int {
+	if channel.SchedulerAutoDisableSeconds == nil || *channel.SchedulerAutoDisableSeconds <= 0 {
+		return globalDefault
+	}
+	return *channel.SchedulerAutoDisableSeconds
+}
+
 func (channel *Channel) Save() error {
 	return DB.Save(channel).Error
 }
@@ -568,6 +620,13 @@ func (channel *Channel) Update() error {
 		return err
 	}
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
+	// 管理员编辑走 GORM 非零值更新，重新启用渠道时不会写零值字段，
+	// 这里显式清除调度器临时禁用标记，避免恢复任务误恢复旧式禁用渠道。
+	if channel.Status == common.ChannelStatusEnabled && channel.AutoDisabledUntil != 0 {
+		if clearErr := SetChannelAutoDisabledUntil(channel.Id, 0); clearErr == nil {
+			channel.AutoDisabledUntil = 0
+		}
+	}
 	err = channel.UpdateAbilities(nil)
 	return err
 }
@@ -769,17 +828,25 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			channel.Status = status
 			shouldUpdateAbilities = true
 		}
+		// 任何状态流转都清除调度器临时禁用标记，保证 auto_disabled_until>0
+		// 恒等于"调度器临时禁用中"。调度器临时禁用会在本函数之后
+		// 通过 SetChannelAutoDisabledUntil 重新写入新的到期时间。
+		channel.AutoDisabledUntil = 0
 		err = channel.SaveWithoutKey()
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
 			return false
 		}
+		CacheSetChannelAutoDisabledUntil(channelId, 0)
 	}
 	return true
 }
 
 func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
+	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(map[string]interface{}{
+		"status":              common.ChannelStatusEnabled,
+		"auto_disabled_until": 0,
+	}).Error
 	if err != nil {
 		return err
 	}

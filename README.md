@@ -52,6 +52,9 @@
 
 </div>
 
+> [!NOTE]
+> This repository contains personal fork enhancements. See [Fork Changes and Maintenance Notes](./README-FORK.md) for the implementation details, build instructions, and differences from upstream. The original New API and QuantumNous attribution remains unchanged.
+
 ## 📝 Project Description
 
 > [!IMPORTANT]

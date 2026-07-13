@@ -81,6 +81,10 @@ func ShouldRetryByStatusCode(code int) bool {
 	if IsAlwaysSkipRetryStatusCode(code) {
 		return false
 	}
+	return ShouldRetryByConfiguredStatusCode(code)
+}
+
+func ShouldRetryByConfiguredStatusCode(code int) bool {
 	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges, code)
 }
 

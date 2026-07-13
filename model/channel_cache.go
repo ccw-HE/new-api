@@ -230,6 +230,43 @@ func filterChannelsByRequestPath(channels []int, requestPath string) []int {
 	return filtered
 }
 
+// getSatisfiedChannelsFromCache 返回内存缓存中满足 group+model+requestPath 的
+// 全部启用渠道（调度器候选集）。要求 common.MemoryCacheEnabled 为 true。
+func getSatisfiedChannelsFromCache(group string, model string, requestPath string) ([]*Channel, error) {
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channelIds := filterChannelsByRequestPath(group2model2channels[group][model], requestPath)
+	if len(channelIds) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(model)
+		channelIds = filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath)
+	}
+	if len(channelIds) == 0 {
+		return nil, nil
+	}
+	channels := make([]*Channel, 0, len(channelIds))
+	for _, channelId := range channelIds {
+		channel, ok := channelsIDM[channelId]
+		if !ok {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+		}
+		channels = append(channels, channel)
+	}
+	return channels, nil
+}
+
+// CacheSetChannelAutoDisabledUntil 同步内存缓存中渠道的临时禁用到期时间。
+func CacheSetChannelAutoDisabledUntil(channelId int, until int64) {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	if channel, ok := channelsIDM[channelId]; ok {
+		channel.AutoDisabledUntil = until
+	}
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)

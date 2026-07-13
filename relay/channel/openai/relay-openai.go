@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -108,6 +109,14 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	defer service.CloseResponseBodyGracefully(resp)
 
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	isJSONResponse := strings.Contains(contentType, "application/json") ||
+		strings.Contains(contentType, "text/json") ||
+		strings.Contains(contentType, "+json")
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && isJSONResponse {
+		return OaiJSONAsStreamHandler(c, info, resp)
+	}
+
 	model := info.UpstreamModelName
 	var responseId string
 	var createAt int64 = 0
@@ -117,16 +126,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var toolCount int
 	var usage = &dto.Usage{}
 	var lastStreamData string
+	var pendingStreamData []string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
+	detectEmptyResponse := info.DetectEmptyResponseForScheduler && !isAudioModel
+	streamHasDeliverable := !detectEmptyResponse
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
-				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
+			if streamHasDeliverable {
+				if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+					common.SysLog("error handling stream format: " + err.Error())
+					sr.Error(err)
+				}
+			} else {
+				pendingStreamData = append(pendingStreamData, lastStreamData)
 			}
 		}
 		if len(data) > 0 {
@@ -140,8 +156,26 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
 			}
+			if !streamHasDeliverable && (strings.TrimSpace(responseTextBuilder.String()) != "" || toolCount > 0) {
+				streamHasDeliverable = true
+				for _, pendingData := range pendingStreamData {
+					if err := HandleStreamFormat(c, info, pendingData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+						common.SysLog("error handling pending stream format: " + err.Error())
+						sr.Error(err)
+					}
+				}
+				pendingStreamData = nil
+			}
 		}
 	})
+
+	if detectEmptyResponse && strings.TrimSpace(responseTextBuilder.String()) == "" && toolCount == 0 {
+		if c.Writer != nil && c.Writer.Written() {
+			logger.LogError(c, "empty stream response detected after downstream write; cannot retry safely")
+		} else {
+			return nil, service.NewEmptyResponseError("openai_stream", "no content, reasoning, or tool calls")
+		}
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -186,6 +220,123 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	return usage, nil
 }
 
+func OaiJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	}
+	logger.LogDebug(c, "upstream non-sse stream response body: %s", responseBody)
+
+	var simpleResponse dto.OpenAITextResponse
+	if err = common.Unmarshal(responseBody, &simpleResponse); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if info.DetectEmptyResponseForScheduler && !service.HasOpenAITextDeliverable(&simpleResponse) {
+		return nil, service.NewEmptyResponseError("openai_stream", "no content, reasoning, or tool calls")
+	}
+
+	usage := simpleResponse.Usage
+	if usage.PromptTokens == 0 {
+		completionTokens := usage.CompletionTokens
+		if completionTokens == 0 {
+			for _, choice := range simpleResponse.Choices {
+				completionTokens += service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
+			}
+		}
+		usage = dto.Usage{
+			PromptTokens:     info.GetEstimatePromptTokens(),
+			CompletionTokens: completionTokens,
+			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
+		}
+	}
+	applyUsagePostProcessing(info, &usage, responseBody)
+
+	responseId := simpleResponse.Id
+	createAt := common.GetTimestamp()
+	switch created := simpleResponse.Created.(type) {
+	case float64:
+		createAt = int64(created)
+	case int64:
+		createAt = created
+	case int:
+		createAt = int64(created)
+	case string:
+		if parsed, parseErr := strconv.ParseInt(created, 10, 64); parseErr == nil {
+			createAt = parsed
+		}
+	}
+	model := simpleResponse.Model
+	if model == "" {
+		model = info.UpstreamModelName
+	}
+
+	var lastStreamData string
+	for _, choice := range simpleResponse.Choices {
+		streamChoice := dto.ChatCompletionsStreamResponseChoice{Index: choice.Index}
+		if choice.Message.Role != "" {
+			streamChoice.Delta.Role = choice.Message.Role
+		} else {
+			streamChoice.Delta.Role = "assistant"
+		}
+		if content := choice.Message.StringContent(); content != "" {
+			streamChoice.Delta.SetContentString(content)
+		}
+		if reasoning := choice.Message.GetReasoningContent(); reasoning != "" {
+			streamChoice.Delta.SetReasoningContent(reasoning)
+		}
+		toolCallsJSON := strings.TrimSpace(string(choice.Message.ToolCalls))
+		if toolCallsJSON != "" && toolCallsJSON != "null" && toolCallsJSON != "[]" && toolCallsJSON != "{}" {
+			var toolCalls []dto.ToolCallResponse
+			if err = common.Unmarshal(choice.Message.ToolCalls, &toolCalls); err != nil {
+				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+			}
+			for i := range toolCalls {
+				if toolCalls[i].Index == nil {
+					toolCalls[i].SetIndex(i)
+				}
+			}
+			streamChoice.Delta.ToolCalls = toolCalls
+		}
+
+		streamResponse := dto.ChatCompletionsStreamResponse{
+			Id:      responseId,
+			Object:  "chat.completion.chunk",
+			Created: createAt,
+			Model:   model,
+			Choices: []dto.ChatCompletionsStreamResponseChoice{streamChoice},
+		}
+		streamData, marshalErr := common.Marshal(streamResponse)
+		if marshalErr != nil {
+			return nil, types.NewOpenAIError(marshalErr, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+		}
+		if err = HandleStreamFormat(c, info, string(streamData), info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+
+		finishReason := choice.FinishReason
+		if finishReason == "" {
+			finishReason = "stop"
+		}
+		stopResponse := helper.GenerateStopResponse(responseId, createAt, model, finishReason)
+		stopData, marshalErr := common.Marshal(stopResponse)
+		if marshalErr != nil {
+			return nil, types.NewOpenAIError(marshalErr, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+		}
+		lastStreamData = string(stopData)
+	}
+
+	if info.RelayFormat == types.RelayFormatOpenAI {
+		if err = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+	}
+	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, "", &usage, false)
+	return &usage, nil
+}
+
 func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -222,9 +373,11 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
-			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "openai_finish_reason=content_filter")
-			break
+			return nil, service.NewUpstreamContentBlockedError(c, "openai_finish_reason=content_filter")
 		}
+	}
+	if info.DetectEmptyResponseForScheduler && !service.HasOpenAITextDeliverable(&simpleResponse) {
+		return nil, service.NewEmptyResponseError("openai", "no content, reasoning, or tool calls")
 	}
 
 	forceFormat := false

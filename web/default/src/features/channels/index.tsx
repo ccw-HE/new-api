@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Settings2 } from 'lucide-react'
+import { Clock, Settings2 } from 'lucide-react'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -32,8 +32,39 @@ import { useAuthStore } from '@/stores/auth-store'
 import { getChannelOps } from './api'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
-import { ChannelsProvider } from './components/channels-provider'
+import { ChannelsProvider, useChannels } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
+
+// 调度器入口：打开渠道页内的调度器面板（全局设置 + 临时禁用渠道）
+function SchedulerEntryBadge() {
+  const { t } = useTranslation()
+  const { setOpen } = useChannels()
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Badge
+            variant='outline'
+            className='shrink-0 cursor-pointer'
+            aria-label={t('Advanced Scheduler')}
+            render={
+              <button
+                type='button'
+                onClick={() => setOpen('scheduler-settings')}
+              />
+            }
+          />
+        }
+      >
+        <span>{t('Scheduler')}</span>
+        <Clock data-icon='inline-end' />
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{t('Advanced Scheduler')}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 export function Channels() {
   const { t } = useTranslation()
@@ -91,6 +122,7 @@ export function Channels() {
           <span className='flex min-w-0 items-center gap-2'>
             <span className='truncate'>{t('Channels')}</span>
             {retryBadge}
+            <SchedulerEntryBadge />
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>

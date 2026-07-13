@@ -232,3 +232,121 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
+
+func TestNormalizeLogCleanupType(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{name: "empty defaults to usage", input: "", expected: logCleanupTypeUsage},
+		{name: "usage", input: "usage", expected: logCleanupTypeUsage},
+		{name: "scheduler", input: "scheduler", expected: logCleanupTypeScheduler},
+		{name: "unknown", input: "server", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual, err := normalizeLogCleanupType(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
+func TestStartLogCleanupTaskRejectsDifferentActiveLogType(t *testing.T) {
+	truncate(t)
+
+	task, err := StartLogCleanupTask(200, logCleanupTypeUsage)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+
+	sameTask, err := StartLogCleanupTask(200, logCleanupTypeUsage)
+	require.NoError(t, err)
+	require.NotNil(t, sameTask)
+	assert.Equal(t, task.TaskID, sameTask.TaskID)
+
+	differentTask, err := StartLogCleanupTask(200, logCleanupTypeScheduler)
+	require.Error(t, err)
+	assert.Nil(t, differentTask)
+	assert.Contains(t, err.Error(), "different log cleanup task")
+}
+
+func TestUsageLogCleanupDoesNotDeleteSchedulerLogs(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		CreatedAt: 100,
+		Type:      model.LogTypeConsume,
+		Content:   "usage old",
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		CreatedAt: 300,
+		Type:      model.LogTypeConsume,
+		Content:   "usage new",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+		CreatedAt: 100,
+		EventType: model.SchedulerEventFailure,
+		ChannelId: 1,
+	}).Error)
+
+	remaining, err := countLogCleanupRows(ctx, logCleanupTypeUsage, 200)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, remaining)
+
+	deleted, err := deleteLogCleanupBatch(ctx, logCleanupTypeUsage, 200, 100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, deleted)
+
+	var usageCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&usageCount).Error)
+	assert.EqualValues(t, 1, usageCount)
+
+	var schedulerCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelSchedulerLog{}).Count(&schedulerCount).Error)
+	assert.EqualValues(t, 1, schedulerCount)
+}
+
+func TestSchedulerLogCleanupDoesNotDeleteUsageLogs(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		CreatedAt: 100,
+		Type:      model.LogTypeConsume,
+		Content:   "usage old",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+		CreatedAt: 100,
+		EventType: model.SchedulerEventFailure,
+		ChannelId: 1,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.ChannelSchedulerLog{
+		CreatedAt: 300,
+		EventType: model.SchedulerEventFailure,
+		ChannelId: 2,
+	}).Error)
+
+	remaining, err := countLogCleanupRows(ctx, logCleanupTypeScheduler, 200)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, remaining)
+
+	deleted, err := deleteLogCleanupBatch(ctx, logCleanupTypeScheduler, 200, 100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, deleted)
+
+	var usageCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&usageCount).Error)
+	assert.EqualValues(t, 1, usageCount)
+
+	var schedulerCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelSchedulerLog{}).Count(&schedulerCount).Error)
+	assert.EqualValues(t, 1, schedulerCount)
+}

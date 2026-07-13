@@ -21,6 +21,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  LogCleanupType,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -48,12 +49,21 @@ export async function confirmPaymentCompliance() {
   return res.data
 }
 
-export async function startLogCleanupTask(targetTimestamp: number) {
+export async function startLogCleanupTask(
+  targetTimestamp: number,
+  logType?: LogCleanupType
+) {
+  const params: { target_timestamp: number; log_type?: LogCleanupType } = {
+    target_timestamp: targetTimestamp,
+  }
+  if (logType) {
+    params.log_type = logType
+  }
   const res = await api.post<SystemTaskResponse<LogCleanupTask>>(
     '/api/system-task/log-cleanup',
     null,
     {
-      params: { target_timestamp: targetTimestamp },
+      params,
     }
   )
   return res.data

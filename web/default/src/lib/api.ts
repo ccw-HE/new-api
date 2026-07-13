@@ -20,6 +20,7 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { t } from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { getBuildRevision } from './build-metadata'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -55,6 +56,8 @@ export const api = axios.create({
 // Prevents multiple identical requests from being sent simultaneously
 const inFlightGet = new Map<string, Promise<unknown>>()
 const originalGet = api.get.bind(api)
+const API_CACHE_BUST_PARAM = '_newapi_cache'
+const API_CACHE_BUST_VALUE = getBuildRevision()
 
 api.get = ((url: string, config: ApiRequestConfig = {}) => {
   const disableDuplicate = config.disableDuplicate
@@ -160,6 +163,10 @@ export function getCommonHeaders(): Record<string, string> {
 
 // Attach user ID header for all requests
 api.interceptors.request.use((config) => {
+  if (shouldBustApiGetCache(config)) {
+    config.params = withApiCacheBust(config.params)
+  }
+
   const uid = getUserId()
   if (uid) {
     // Custom header for user identification
@@ -167,6 +174,49 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+function shouldBustApiGetCache(config: ApiRequestConfig): boolean {
+  const method = (config.method ?? 'get').toLowerCase()
+  const url = config.url ?? ''
+  return method === 'get' && isApiRequestUrl(url)
+}
+
+function isApiRequestUrl(url: string): boolean {
+  let path = url
+
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      path = new URL(url).pathname
+    } catch {
+      return false
+    }
+  }
+
+  const cleanPath = path.split(/[?#]/, 1)[0]
+  const normalizedPath = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`
+  return normalizedPath === '/api' || normalizedPath.startsWith('/api/')
+}
+
+function withApiCacheBust(params: unknown): unknown {
+  if (params instanceof URLSearchParams) {
+    const next = new URLSearchParams(params)
+    next.set(API_CACHE_BUST_PARAM, API_CACHE_BUST_VALUE)
+    return next
+  }
+
+  if (params && typeof params === 'object' && !Array.isArray(params)) {
+    return {
+      ...(params as Record<string, unknown>),
+      [API_CACHE_BUST_PARAM]: API_CACHE_BUST_VALUE,
+    }
+  }
+
+  if (params == null) {
+    return { [API_CACHE_BUST_PARAM]: API_CACHE_BUST_VALUE }
+  }
+
+  return params
+}
 
 // ============================================================================
 // Common API Functions

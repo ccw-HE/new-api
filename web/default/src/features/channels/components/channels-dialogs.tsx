@@ -18,12 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
+import { ChannelSchedulerConfigDialog } from './dialogs/channel-scheduler-config-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
 import { CopyChannelDialog } from './dialogs/copy-channel-dialog'
 import { EditTagDialog } from './dialogs/edit-tag-dialog'
 import { FetchModelsDialog } from './dialogs/fetch-models-dialog'
 import { MultiKeyManageDialog } from './dialogs/multi-key-manage-dialog'
 import { OllamaModelsDialog } from './dialogs/ollama-models-dialog'
+import { SchedulerSettingsDialog } from './dialogs/scheduler-settings-dialog'
 import { TagBatchEditDialog } from './dialogs/tag-batch-edit-dialog'
 import { UpstreamUpdateDialog } from './dialogs/upstream-update-dialog'
 import { ChannelMutateDrawer } from './drawers/channel-mutate-drawer'
@@ -85,6 +87,18 @@ export function ChannelsDialogs() {
       {/* Edit Tag Dialog */}
       <EditTagDialog
         open={open === 'edit-tag'}
+        onOpenChange={(v) => !v && setOpen(null)}
+      />
+
+      {/* Channel Scheduler Panel (global settings + temp-disabled channels) */}
+      <SchedulerSettingsDialog
+        open={open === 'scheduler-settings'}
+        onOpenChange={(v) => !v && setOpen(null)}
+      />
+
+      {/* Per-channel Scheduler Config Dialog */}
+      <ChannelSchedulerConfigDialog
+        open={open === 'scheduler-config'}
         onOpenChange={(v) => !v && setOpen(null)}
       />
 

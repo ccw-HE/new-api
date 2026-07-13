@@ -13,6 +13,10 @@ web/classic/dist
 web/node_modules
 web/dist
 .env
+.env.*
+!.env.example
+!.env.*.example
+.snow/
 one-api
 new-api
 /__debug_bin*
@@ -31,6 +35,8 @@ electron/dist
 data/
 .gomodcache/
 .gocache-temp
+.gocache-test/
+.gomodcache-test/
 .gopath
 .test
 token_estimator_test.go

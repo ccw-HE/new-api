@@ -36,7 +36,11 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 
 	if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
-		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
+		return nil, service.NewUpstreamContentBlockedError(c, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
+	}
+	if !service.HasGeminiChatDeliverable(&geminiResponse) {
+		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "gemini_empty_parts")
+		return nil, service.NewEmptyResponseError("gemini", "candidates contain no deliverable parts")
 	}
 
 	// 计算使用量（基于 UsageMetadata）

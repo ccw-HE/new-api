@@ -274,6 +274,21 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
+		for _, schedulerRoutePrefix := range []string{"/channel_scheduler", "/channel-scheduler"} {
+			channelSchedulerRoute := apiRouter.Group(schedulerRoutePrefix)
+			{
+				channelSchedulerRoute.GET("/logs", middleware.AdminAuth(), controller.GetChannelSchedulerLogs)
+				channelSchedulerRoute.GET("/logs/stat", middleware.AdminAuth(), controller.GetChannelSchedulerLogsStat)
+				channelSchedulerRoute.DELETE("/logs", middleware.RootAuth(), controller.DeleteChannelSchedulerLogs)
+				channelSchedulerRoute.GET("/disabled", middleware.AdminAuth(), controller.GetSchedulerDisabledChannels)
+				channelSchedulerRoute.GET("/config", middleware.RootAuth(), controller.GetChannelSchedulerConfig)
+				channelSchedulerRoute.PUT("/config", middleware.RootAuth(), controller.UpdateChannelSchedulerConfig)
+				channelSchedulerRoute.GET("/channel/:id/config", middleware.AdminAuth(), controller.GetChannelSchedulerChannelConfig)
+				channelSchedulerRoute.PUT("/channel/:id/config", middleware.RootAuth(), controller.UpdateChannelSchedulerChannelConfig)
+				channelSchedulerRoute.POST("/restore/:id", middleware.RootAuth(), controller.RestoreSchedulerChannel)
+			}
+		}
+
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{
