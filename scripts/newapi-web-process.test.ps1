@@ -99,6 +99,25 @@ try {
     Assert-True ($exitCode -eq 0) 'stop without a PID record must be non-destructive'
     Assert-True (-not $foreign.HasExited) 'stop without a PID record killed a foreign process'
 
+    $staleProjectPort = Get-FreePort
+    $staleProjectPidFile = Join-Path $tempRoot 'stale-project.pid.json'
+    $staleProject = Start-TestListener $staleProjectPort $root $serverScript
+
+    $exitCode = Invoke-Helper @('-Action', 'AssertFree', '-Root', $root, '-PidFile', $staleProjectPidFile, '-Port', [string]$staleProjectPort)
+    Assert-True ($exitCode -eq 0) 'same-project listener without a PID record must be safely adopted'
+    Assert-True (Test-Path -LiteralPath $staleProjectPidFile -PathType Leaf) 'adopted same-project listener PID record was not created'
+    $staleRecord = Get-Content -LiteralPath $staleProjectPidFile -Raw | ConvertFrom-Json
+    Assert-True ([int]$staleRecord.pid -eq $staleProject.Id) 'adopted PID record does not identify the same-project listener'
+
+    $exitCode = Invoke-Helper @('-Action', 'Launch', '-Root', $root, '-PidFile', $staleProjectPidFile, '-Port', [string]$staleProjectPort, '-LaunchMode', 'NodeScript', '-Executable', $NodeExecutable, '-ScriptPath', $serverScript)
+    Assert-True ($exitCode -eq 0) 'launch must reuse an already adopted same-project listener'
+    Assert-True (-not $staleProject.HasExited) 'launch terminated the adopted same-project listener'
+
+    $exitCode = Invoke-Helper @('-Action', 'Stop', '-Root', $root, '-PidFile', $staleProjectPidFile, '-Port', [string]$staleProjectPort)
+    Assert-True ($exitCode -eq 0) 'stop must terminate an adopted same-project listener'
+    $staleProject.WaitForExit(5000) | Out-Null
+    Assert-True $staleProject.HasExited 'adopted same-project listener remained alive'
+
     $ownedPort = Get-FreePort
     $ownedPidFile = Join-Path $tempRoot 'owned.pid.json'
 
@@ -144,6 +163,30 @@ try {
     Assert-True ($batch -notmatch '-Action Save') 'batch still records an arbitrary existing listener'
     Assert-True ($batch -match '-Action Stop') 'batch stop does not use the verified PID helper'
     Assert-True ($batch -notmatch 'Get-NetTCPConnection|OwningProcess') 'batch file still enumerates and kills frontend port owners directly'
+    Assert-True ($batch -match 'set "PROJECT_ROOT=%~dp0\."') 'batch does not define a root argument without a trailing backslash'
+    Assert-True ($batch -notmatch '-Root "%ROOT%"') 'batch still passes a trailing-backslash root to PowerShell'
+    Assert-True ($batch -match '& \$script stop-all') 'Ctrl+C cleanup does not close Docker Desktop'
+    Assert-True ($batch -match 'newapi-lifecycle-watch\.ps1') 'batch does not start the close-window lifecycle watcher'
+
+    $watcher = Join-Path $PSScriptRoot 'newapi-lifecycle-watch.ps1'
+    Assert-True (Test-Path -LiteralPath $watcher -PathType Leaf) 'lifecycle watcher script was not found'
+    $watchRoot = Join-Path $tempRoot 'watcher'
+    New-Item -ItemType Directory -Path $watchRoot | Out-Null
+    $cleanupMarker = Join-Path $watchRoot 'cleanup.marker'
+    $cleanupScript = Join-Path $watchRoot 'cleanup.cmd'
+    Set-Content -LiteralPath $cleanupScript -Encoding ASCII -Value @(
+        '@echo off'
+        "echo %1>`"$cleanupMarker`""
+    )
+    $shortOwner = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Milliseconds 500') -WindowStyle Hidden -PassThru
+    $processes.Add($shortOwner)
+    $watchProcess = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcher, '-OwnerProcessId', [string]$shortOwner.Id, '-Root', $watchRoot, '-StartupScript', $cleanupScript) -WindowStyle Hidden -PassThru
+    $processes.Add($watchProcess)
+    $watchProcess.WaitForExit(10000) | Out-Null
+    Assert-True $watchProcess.HasExited 'lifecycle watcher did not exit after its owner closed'
+    Assert-True ($watchProcess.ExitCode -eq 0) 'lifecycle watcher cleanup command failed'
+    Assert-True (Test-Path -LiteralPath $cleanupMarker -PathType Leaf) 'lifecycle watcher did not invoke cleanup'
+    Assert-True ((Get-Content -LiteralPath $cleanupMarker -Raw).Trim() -eq 'stop-all') 'lifecycle watcher did not request full Docker shutdown'
 
     Write-Output 'newapi web process safety tests passed'
 } finally {

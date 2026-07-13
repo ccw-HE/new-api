@@ -103,8 +103,62 @@ function Get-ProcessIdentity([int]$ProcessId) {
         pid = [int]$process.ProcessId
         parent_pid = [int]$process.ParentProcessId
         created_at_ticks = $process.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)
+        name = [string]$process.Name
         command_line = [string]$process.CommandLine
     }
+}
+
+function Test-IdentityBelongsToProject($Identity) {
+    if ($null -eq $Identity) {
+        return $false
+    }
+    $allowedProcessNames = @('node.exe', 'bun.exe')
+    if ($allowedProcessNames -notcontains $Identity.name) {
+        return $false
+    }
+    return $Identity.command_line.IndexOf($normalizedRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Save-ListenerRecord($Identity, [int]$LauncherProcessId) {
+    $record = [ordered]@{
+        version = 2
+        root = $normalizedRoot
+        port = $Port
+        pid = $Identity.pid
+        created_at_ticks = $Identity.created_at_ticks
+        command_line = $Identity.command_line
+        launcher_pid = $LauncherProcessId
+    }
+    Assert-SafePidFile
+    $record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $normalizedPidFile -Encoding UTF8
+}
+
+function Test-OrAdoptOwnedListener([int]$ListenerProcessId) {
+    $identity = Get-ProcessIdentity $ListenerProcessId
+    if ($null -eq $identity) {
+        return $false
+    }
+    if (Test-Path -LiteralPath $normalizedPidFile -PathType Leaf) {
+        try {
+            $record = Get-Content -LiteralPath $normalizedPidFile -Raw | ConvertFrom-Json
+            $recordMatches = [int]$record.version -eq 2 -and
+                [string]$record.root -eq $normalizedRoot -and
+                [int]$record.port -eq $Port -and
+                [int]$record.pid -eq $identity.pid -and
+                [string]$record.created_at_ticks -eq $identity.created_at_ticks -and
+                [string]$record.command_line -eq $identity.command_line
+            if ($recordMatches) {
+                return $true
+            }
+        } catch {
+        }
+    }
+    if (-not (Test-IdentityBelongsToProject $identity)) {
+        return $false
+    }
+    Save-ListenerRecord $identity 0
+    Write-Output "Adopted existing project WebUI PID: $ListenerProcessId"
+    return $true
 }
 
 function Test-ProcessDescendsFrom([int]$ProcessId, [int]$AncestorProcessId) {
@@ -131,6 +185,9 @@ switch ($Action) {
     'AssertFree' {
         $listenerPid = Get-ListenerProcessId
         if ($null -ne $listenerPid) {
+            if (Test-OrAdoptOwnedListener $listenerPid) {
+                exit 0
+            }
             Write-Error "Port $Port is already used by PID $listenerPid. Refusing to reuse or terminate it."
             exit 1
         }
@@ -140,7 +197,12 @@ switch ($Action) {
     'Launch' {
         $launchedProcess = $null
         try {
-            if ($null -ne (Get-ListenerProcessId)) {
+            $existingListenerPid = Get-ListenerProcessId
+            if ($null -ne $existingListenerPid -and (Test-OrAdoptOwnedListener $existingListenerPid)) {
+                Write-Output "WebUI is already running with verified PID: $existingListenerPid"
+                exit 0
+            }
+            if ($null -ne $existingListenerPid) {
                 throw "Port $Port is already in use. Refusing to launch or terminate its owner."
             }
             if ([string]::IsNullOrWhiteSpace($Executable)) {
@@ -204,17 +266,7 @@ switch ($Action) {
             if ($null -eq $identity) {
                 throw "Listener PID $listenerPid exited before its identity could be recorded."
             }
-            $record = [ordered]@{
-                version = 2
-                root = $normalizedRoot
-                port = $Port
-                pid = $identity.pid
-                created_at_ticks = $identity.created_at_ticks
-                command_line = $identity.command_line
-                launcher_pid = $launchedProcess.Id
-            }
-            Assert-SafePidFile
-            $record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $normalizedPidFile -Encoding UTF8
+            Save-ListenerRecord $identity $launchedProcess.Id
             Write-Output "WebUI launched and PID recorded: $listenerPid"
             exit 0
         } catch {

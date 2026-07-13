@@ -84,6 +84,7 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 
 	// Do not passthrough credentials by wildcard/regex.
 	"authorization":  {},
+	"api-key":        {},
 	"x-api-key":      {},
 	"x-goog-api-key": {},
 
@@ -182,8 +183,9 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 //   - {api_key}: resolved to the channel API key
 //   - {client_header:<name>}: resolved to the incoming request header value
 //
-// Header passthrough rules (keys only; values are ignored):
-//   - "*": passthrough all incoming headers by name (excluding unsafe headers)
+// Safe incoming headers are passed through by default for non-test requests.
+// Header passthrough rules:
+//   - "*": false disables the default passthrough; any other value enables it
 //   - "re:<regex>" / "regex:<regex>": passthrough headers whose names match the regex (Go regexp)
 //
 // Passthrough rules are applied first, then normal overrides are applied, so explicit overrides win.
@@ -195,16 +197,20 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 
 	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
 
-	passAll := false
+	passAll := !info.IsChannelTest
 	var passthroughRegex []*regexp.Regexp
 	if !info.IsChannelTest {
-		for k := range headerOverrideSource {
+		for k, rawValue := range headerOverrideSource {
 			key := strings.TrimSpace(strings.ToLower(k))
 			if key == "" {
 				continue
 			}
 			if key == headerPassthroughAllKey {
-				passAll = true
+				if value, ok := rawValue.(string); ok && strings.EqualFold(strings.TrimSpace(value), "false") {
+					passAll = false
+				} else {
+					passAll = true
+				}
 				continue
 			}
 
@@ -287,8 +293,26 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	return headerOverride, nil
 }
 
-func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
-	return processHeaderOverride(info, c)
+func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context, adaptorHeaders http.Header) (map[string]string, error) {
+	headerOverride, err := processHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	removePassthroughHeaderConflicts(headerOverride, adaptorHeaders, info)
+	return headerOverride, nil
+}
+
+func removePassthroughHeaderConflicts(headerOverride map[string]string, adaptorHeaders http.Header, info *common.RelayInfo) {
+	explicitOverrides := common.GetEffectiveHeaderOverride(info)
+	for key := range headerOverride {
+		if _, exists := adaptorHeaders[http.CanonicalHeaderKey(key)]; !exists {
+			continue
+		}
+		if _, explicitlyConfigured := explicitOverrides[strings.ToLower(strings.TrimSpace(key))]; explicitlyConfigured {
+			continue
+		}
+		delete(headerOverride, key)
+	}
 }
 
 func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
@@ -322,7 +346,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
-	headerOverride, err := processHeaderOverride(info, c)
+	headerOverride, err := ResolveHeaderOverride(info, c, req.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +378,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	}
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
-	headerOverride, err := processHeaderOverride(info, c)
+	headerOverride, err := ResolveHeaderOverride(info, c, req.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +402,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
-	headerOverride, err := processHeaderOverride(info, c)
+	headerOverride, err := ResolveHeaderOverride(info, c, targetHeader)
 	if err != nil {
 		return nil, err
 	}

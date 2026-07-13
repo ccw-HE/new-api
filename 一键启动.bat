@@ -3,9 +3,11 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "ROOT=%~dp0"
+set "PROJECT_ROOT=%~dp0."
 set "WEB_PORT=3001"
 set "PID_FILE=%ROOT%.newapi-web.pid.json"
 set "WEB_PROCESS_HELPER=%ROOT%scripts\newapi-web-process.ps1"
+set "LIFECYCLE_WATCHER=%ROOT%scripts\newapi-lifecycle-watch.ps1"
 set "DOCKER_BIN=C:\Program Files\Docker\Docker\resources\bin"
 set "DOCKER_DESKTOP=C:\Program Files\Docker\Docker\Docker Desktop.exe"
 set "DOCKER_CLI=C:\Program Files\Docker\Docker\DockerCli.exe"
@@ -87,11 +89,11 @@ echo WebUI:   http://localhost:%WEB_PORT%
 echo.
 echo Tip: backend rebuild is automatic when the source stamp changes; use "%~nx0" build to force it.
 echo Keep this window open.
-echo Press Ctrl+C in this window to stop WebUI and this project's Docker services.
+echo Press Ctrl+C in this window to stop WebUI, project services, and Docker Desktop.
 echo.
 
 set "NEWAPI_SCRIPT=%~f0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$script=$env:NEWAPI_SCRIPT; Write-Host 'Guarding. Press Ctrl+C to stop new-api.'; try { [Console]::TreatControlCAsInput=$true; while ($true) { if ([Console]::KeyAvailable) { $key=[Console]::ReadKey($true); if (($key.Key -eq 'C') -and (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)) { break } }; Start-Sleep -Milliseconds 150 } } finally { try { [Console]::TreatControlCAsInput=$false } catch {}; if (Test-Path -LiteralPath $script) { $env:NEWAPI_NO_PAUSE='1'; & $script stop } else { Write-Host 'Startup script not found. Please stop services manually.' } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$watcher=$env:LIFECYCLE_WATCHER; $root=$env:PROJECT_ROOT; $script=$env:NEWAPI_SCRIPT; if (-not (Test-Path -LiteralPath $watcher)) { throw 'Lifecycle watcher not found: ' + $watcher }; Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$watcher,'-OwnerProcessId',[string]$PID,'-Root',$root,'-StartupScript',$script) | Out-Null; Write-Host 'Guarding. Press Ctrl+C to stop new-api and Docker Desktop.'; try { [Console]::TreatControlCAsInput=$true; while ($true) { if ([Console]::KeyAvailable) { $key=[Console]::ReadKey($true); if (($key.Key -eq 'C') -and (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)) { break } }; Start-Sleep -Milliseconds 150 } } finally { try { [Console]::TreatControlCAsInput=$false } catch {}; if (Test-Path -LiteralPath $script) { $env:NEWAPI_NO_PAUSE='1'; & $script stop-all } else { Write-Host 'Startup script not found. Please stop services manually.' } }"
 exit /b 0
 
 :CheckDocker
@@ -173,18 +175,18 @@ if not exist "%WEB_PROCESS_HELPER%" (
   echo WebUI process helper not found: %WEB_PROCESS_HELPER%
   exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action AssertFree -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action AssertFree -Root "%PROJECT_ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
 exit /b %errorlevel%
 
 :LaunchWeb
-powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Launch -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT% -LaunchMode BunDev -Executable "%BUN_EXE%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Launch -Root "%PROJECT_ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT% -LaunchMode BunDev -Executable "%BUN_EXE%"
 exit /b %errorlevel%
 
 :stop
 echo.
 echo Stopping frontend WebUI...
 if exist "%WEB_PROCESS_HELPER%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Stop -Root "%ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%WEB_PROCESS_HELPER%" -Action Stop -Root "%PROJECT_ROOT%" -PidFile "%PID_FILE%" -Port %WEB_PORT%
 ) else (
   echo WebUI process helper not found. No frontend process was terminated; handle it manually.
 )
@@ -226,7 +228,11 @@ echo.
 echo new-api development environment stopped.
 echo Containers are stopped and kept for faster next start.
 echo Test database volume is kept.
-echo Docker Desktop is left running. Use "%~nx0" stop-all to close Docker Desktop too.
+if defined CLOSE_DOCKER_DESKTOP (
+  echo Docker Desktop shutdown requested.
+) else (
+  echo Docker Desktop is left running. Use "%~nx0" stop-all to close Docker Desktop too.
+)
 echo To fully remove stopped containers and networks manually, run:
 echo docker compose -f docker-compose.dev.yml down
 echo To delete test database volume manually, run:
