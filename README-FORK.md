@@ -2,7 +2,7 @@
 
 > 本仓库是基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 的个人二开版本，不代表上游官方发行版。New API、QuantumNous、原项目许可证、NOTICE、模块路径和原始署名均保持不变。
 
-本文只说明本分支相对上游新增或调整的部分。New API 原有功能、部署参数和使用方式请继续查阅[主 README](./README.md)、[简体中文 README](./README.zh_CN.md)和[上游官方文档](https://docs.newapi.pro/)。
+本文只说明个人仓库 `main` 相对上游新增或调整的部分。New API 原有功能、部署参数和使用方式请继续查阅[主 README](./README.md)、[简体中文 README](./README.zh_CN.md)和[上游官方文档](https://docs.newapi.pro/)。
 
 ## 上游关系
 
@@ -10,11 +10,12 @@
 | --- | --- |
 | 上游仓库 | [QuantumNous/new-api](https://github.com/QuantumNous/new-api) |
 | 个人仓库 | [ccw-HE/new-api](https://github.com/ccw-HE/new-api) |
-| 功能分支 | `feature/scheduler-failover` |
+| 维护分支 | `main` |
+| 合并状态 | 已合并到个人仓库 `main`，后续长期维护以 `main` 为准 |
 | 分叉基准 | `69b0f0b56f528efa292a2893feb0c55c37399f4b` |
 | 主要方向 | 高级渠道调度、同级故障转移、转发韧性、调度日志和依赖安全维护 |
 
-当前二开说明只维护中文版本。本分支暂未向上游提交 PR，文中能力不应被理解为上游版本已经支持。
+当前二开说明只维护中文版本。本仓库暂未向上游提交 PR，文中能力不应被理解为上游版本已经支持。
 
 ## 功能总览
 
