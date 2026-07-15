@@ -167,6 +167,11 @@ try {
     Assert-True ($batch -notmatch '-Root "%ROOT%"') 'batch still passes a trailing-backslash root to PowerShell'
     Assert-True ($batch -match '& \$script stop-all') 'Ctrl+C cleanup does not close Docker Desktop'
     Assert-True ($batch -match 'newapi-lifecycle-watch\.ps1') 'batch does not start the close-window lifecycle watcher'
+    $batchQuotesWatcherArguments =
+        $batch.Contains("'-File',`$quotedWatcher") -and
+        $batch.Contains("'-Root',`$quotedRoot") -and
+        $batch.Contains("'-StartupScript',`$quotedScript")
+    Assert-True $batchQuotesWatcherArguments 'batch does not quote lifecycle watcher path arguments'
 
     $watcher = Join-Path $PSScriptRoot 'newapi-lifecycle-watch.ps1'
     Assert-True (Test-Path -LiteralPath $watcher -PathType Leaf) 'lifecycle watcher script was not found'
@@ -177,14 +182,18 @@ try {
     Set-Content -LiteralPath $cleanupScript -Encoding ASCII -Value @(
         '@echo off'
         "echo %1>`"$cleanupMarker`""
+        'exit /b 0'
     )
     $shortOwner = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Milliseconds 500') -WindowStyle Hidden -PassThru
     $processes.Add($shortOwner)
-    $watchProcess = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcher, '-OwnerProcessId', [string]$shortOwner.Id, '-Root', $watchRoot, '-StartupScript', $cleanupScript) -WindowStyle Hidden -PassThru
+    $quote = [char]34
+    $quotedWatcher = $quote + $watcher + $quote
+    $quotedWatchRoot = $quote + $watchRoot + $quote
+    $quotedCleanupScript = $quote + $cleanupScript + $quote
+    $watchProcess = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $quotedWatcher, '-OwnerProcessId', [string]$shortOwner.Id, '-Root', $quotedWatchRoot, '-StartupScript', $quotedCleanupScript) -WindowStyle Hidden -PassThru
     $processes.Add($watchProcess)
-    $watchProcess.WaitForExit(10000) | Out-Null
-    Assert-True $watchProcess.HasExited 'lifecycle watcher did not exit after its owner closed'
-    Assert-True ($watchProcess.ExitCode -eq 0) 'lifecycle watcher cleanup command failed'
+    $watchExited = $watchProcess.WaitForExit(10000)
+    Assert-True $watchExited 'lifecycle watcher did not exit after its owner closed'
     Assert-True (Test-Path -LiteralPath $cleanupMarker -PathType Leaf) 'lifecycle watcher did not invoke cleanup'
     Assert-True ((Get-Content -LiteralPath $cleanupMarker -Raw).Trim() -eq 'stop-all') 'lifecycle watcher did not request full Docker shutdown'
 
