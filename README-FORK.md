@@ -30,6 +30,7 @@
 | 空响应检测 | 避免把没有可交付内容的上游响应当作成功结果 | OpenAI、Responses、Gemini、Claude 转发链路 |
 | Header 继承与安全透传 | 保留客户端业务 Header，同时跳过协议级和敏感 Header | 渠道 Header 覆盖配置 |
 | 请求与流生命周期加固 | 减少重试时请求体已消费、Content-Length 不一致或流提前结束 | Relay 和 Web 进程生命周期逻辑 |
+| Windows 本地开发启动 | 检查 Docker 和 Bun，启动本地后端依赖与 Default WebUI，并在源码变化时重建后端镜像 | 根目录 `start.bat`、`docker-compose.dev.yml` 和 `run scripts/` |
 | 依赖与上传安全 | 修复已知依赖漏洞，避免环境文件和本地开发目录进入 Git 或镜像 | Go、Web、Electron 锁文件及忽略规则 |
 
 ## 高级渠道调度器
@@ -315,6 +316,35 @@ node --version
 npm --version
 ```
 
+### Windows 一键启动（本地开发）
+
+根目录的 `start.bat` 面向 Windows 本地开发环境，需要 Docker Desktop 和 Bun。直接双击该文件，或在 PowerShell 中运行：
+
+```powershell
+.\start.bat
+```
+
+脚本会检查并启动 Docker Engine，通过 `docker-compose.dev.yml` 启动本地源码构建的后端、PostgreSQL 和 Redis；如果 `web/node_modules` 不存在，会先在 `web` 目录执行 `bun install`，随后启动 Default 前端开发服务器并打开浏览器。
+
+- 后端地址：`http://localhost:3000`
+- Default WebUI 地址：`http://localhost:3001`
+- 后端镜像不存在或源码指纹变化时，脚本会自动重新构建 `new-api-dev:local`。
+- 前端端口被其他项目占用时，脚本会停止启动，不会终止不属于当前项目的进程。
+- 保持启动窗口打开。按 `Ctrl+C` 或关闭窗口会停止 WebUI 和开发服务，并请求关闭 Docker Desktop。
+
+可用参数：
+
+| 命令 | 行为 |
+| --- | --- |
+| `.\start.bat` | 启动开发环境，按源码指纹决定是否重建后端镜像 |
+| `.\start.bat build` | 强制重新构建后端镜像后启动 |
+| `.\start.bat rebuild` | 与 `build` 相同 |
+| `.\start.bat probe` | 只显示源码指纹、镜像指纹和后端重建判断，不启动服务 |
+| `.\start.bat stop` | 停止 WebUI 和 Compose 服务，保留 Docker Desktop、容器和数据卷 |
+| `.\start.bat stop-all` | 在 `stop` 的基础上请求关闭 Docker Desktop |
+
+`run scripts/` 中的 PowerShell 文件是 `start.bat` 使用的进程归属检查、生命周期清理和回归测试脚本，不是独立启动入口。需要完全删除本地开发容器、网络或数据卷时，再手工运行批处理文件结束提示中的 `docker compose ... down` 命令。
+
 ### Go 后端
 
 ```powershell
@@ -356,6 +386,8 @@ npx electron-builder --version
 
 ### Docker
 
+Windows 本地开发优先使用上一节的 `start.bat`。它调用 `docker-compose.dev.yml` 和 `Dockerfile.dev`，后端镜像直接由当前工作区源码构建，不依赖公开发行镜像。
+
 上游 `docker-compose.yml` 默认引用 `calciumion/new-api:latest`，该公开镜像不包含本分支二开功能。使用本分支时需要自行构建镜像：
 
 ```powershell
@@ -371,7 +403,7 @@ docker run --name new-api-fork -d --restart always `
 
 ## 依赖与上传安全
 
-本轮依赖维护包括：
+当前分支的依赖维护包括：
 
 - Go：升级 `golang.org/x/image`、`golang.org/x/net`、`golang.org/x/sync` 和 `golang.org/x/text`。
 - Web：更新 DOMPurify、Hono、Vite、esbuild、form-data、minimist 等直接或传递依赖约束，并刷新 `web/bun.lock`。
