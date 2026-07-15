@@ -35,21 +35,13 @@ import {
   RefreshCw,
   Loader2,
   Clock,
-  RotateCcw,
   FileText,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
-import {
-  ADMIN_PERMISSION_ACTIONS,
-  ADMIN_PERMISSION_RESOURCES,
-  hasPermission,
-} from '@/lib/admin-permissions'
-import { useAuthStore } from '@/stores/auth-store'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,12 +56,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
-  restoreSchedulerChannel,
-  schedulerQueryKeys,
-} from '@/features/usage-logs/scheduler/api'
-import { ROLE } from '@/lib/roles'
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
 
-import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
+import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
   handleDeleteChannel,
@@ -95,7 +88,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const currentUser = useAuthStore((s) => s.auth.user)
-  const isRoot = (currentUser?.role ?? 0) >= ROLE.SUPER_ADMIN
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
@@ -107,18 +99,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
-  const isSchedulerTempDisabled =
-    channel.status === CHANNEL_STATUS.AUTO_DISABLED &&
-    (channel.auto_disabled_until ?? 0) > 0
-  const isSchedulerDisableExpired =
-    isSchedulerTempDisabled &&
-    (channel.auto_disabled_until ?? 0) <= Math.floor(Date.now() / 1000)
-  const canManualRestore =
-    isRoot &&
-    isSchedulerTempDisabled &&
-    isSchedulerDisableExpired &&
-    channel.scheduler_manual_restore_allowed !== false
-
   const handleEdit = () => {
     setCurrentRow(channel)
     setOpen('update-channel')
@@ -135,15 +115,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       params: { section: 'scheduler' },
       search: { channel: String(channel.id) },
     })
-  }
-
-  const handleSchedulerRestore = async () => {
-    const result = await restoreSchedulerChannel(channel.id)
-    if (result.success) {
-      toast.success(t('Channel restored'))
-      queryClient.invalidateQueries({ queryKey: channelsQueryKeys.all })
-      queryClient.invalidateQueries({ queryKey: schedulerQueryKeys.all })
-    }
   }
 
   const handleTest = () => {
@@ -416,16 +387,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               <Clock size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-
-          {/* Manual restore from scheduler temp-disable */}
-          {canManualRestore && (
-            <DropdownMenuItem onClick={handleSchedulerRestore}>
-              {t('Restore Now')}
-              <DropdownMenuShortcut>
-                <RotateCcw size={16} />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-          )}
 
           {/* View scheduler logs filtered by this channel */}
           <DropdownMenuItem onClick={handleViewSchedulerLogs}>

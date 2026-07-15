@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, RotateCcw } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -30,7 +30,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
   getSchedulerChannelConfig,
-  restoreSchedulerChannel,
   schedulerQueryKeys,
   updateSchedulerChannelConfig,
 } from '@/features/usage-logs/scheduler/api'
@@ -51,7 +50,6 @@ type ChannelSchedulerConfigDialogProps = {
 interface FormState {
   enabled: boolean
   autoRecover: boolean
-  manualRestore: boolean
   retryTimes: string
   disableSeconds: string
 }
@@ -88,7 +86,6 @@ export function ChannelSchedulerConfigDialog({
       setForm({
         enabled: config.effective.scheduler_enabled,
         autoRecover: config.effective.scheduler_auto_recover_enabled,
-        manualRestore: config.effective.scheduler_manual_restore_allowed,
         retryTimes:
           config.scheduler_retry_times != null
             ? String(config.scheduler_retry_times)
@@ -118,30 +115,12 @@ export function ChannelSchedulerConfigDialog({
     },
   })
 
-  const restoreMutation = useMutation({
-    mutationFn: () => restoreSchedulerChannel(channelId),
-    onSuccess: (result) => {
-      if (result.success) {
-        toast.success(t('Channel restored'))
-        invalidate()
-      }
-    },
-  })
-
   if (!currentRow) return null
 
   const isTempDisabled =
     config != null &&
     config.status === CHANNEL_STATUS.AUTO_DISABLED &&
     config.auto_disabled_until > 0
-  const isSchedulerDisableExpired =
-    isTempDisabled &&
-    config.auto_disabled_until <= Math.floor(Date.now() / 1000)
-  const canManualRestore =
-    isRoot &&
-    isSchedulerDisableExpired &&
-    config?.effective.scheduler_manual_restore_allowed
-
   const handleSave = () => {
     if (!form) return
     const retryTimes = form.retryTimes.trim()
@@ -168,7 +147,6 @@ export function ChannelSchedulerConfigDialog({
     saveMutation.mutate({
       scheduler_enabled: form.enabled,
       scheduler_auto_recover_enabled: form.autoRecover,
-      scheduler_manual_restore_allowed: form.manualRestore,
       scheduler_retry_times: retryTimes === '' ? null : retryTimesValue,
       scheduler_auto_disable_seconds:
         disableSeconds === '' ? null : Number(disableSeconds),
@@ -179,7 +157,6 @@ export function ChannelSchedulerConfigDialog({
     saveMutation.mutate({
       scheduler_enabled: null,
       scheduler_auto_recover_enabled: null,
-      scheduler_manual_restore_allowed: null,
       scheduler_retry_times: null,
       scheduler_auto_disable_seconds: null,
     })
@@ -242,17 +219,6 @@ export function ChannelSchedulerConfigDialog({
                     {formatTimestampToDate(config.auto_disabled_until)}
                   </span>
                 </span>
-                {canManualRestore && (
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    disabled={restoreMutation.isPending}
-                    onClick={() => restoreMutation.mutate()}
-                  >
-                    <RotateCcw className='mr-1 size-3.5' />
-                    {t('Restore Now')}
-                  </Button>
-                )}
               </AlertDescription>
             </Alert>
           )}
@@ -341,26 +307,6 @@ export function ChannelSchedulerConfigDialog({
               onCheckedChange={(checked) =>
                 setForm((prev) =>
                   prev ? { ...prev, autoRecover: checked } : prev
-                )
-              }
-            />
-          </div>
-
-          <div className='flex items-start justify-between gap-4'>
-            <div className='min-w-0 space-y-0.5'>
-              <Label className='text-sm'>{t('Allow Manual Restore')}</Label>
-              <p className='text-muted-foreground text-xs'>
-                {t(
-                  'Whether administrators can manually restore this channel while it is temporarily disabled.'
-                )}
-              </p>
-            </div>
-            <Switch
-              checked={form.manualRestore}
-              disabled={!isRoot}
-              onCheckedChange={(checked) =>
-                setForm((prev) =>
-                  prev ? { ...prev, manualRestore: checked } : prev
                 )
               }
             />

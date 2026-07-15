@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import { buildQueryParams } from '../lib/utils'
 import type {
   ApiEnvelope,
@@ -80,7 +81,9 @@ export async function updateSchedulerGlobalConfig(
 export async function getSchedulerChannelConfig(
   channelId: number
 ): Promise<ApiEnvelope<SchedulerChannelConfig>> {
-  const res = await api.get(`/api/channel_scheduler/channel/${channelId}/config`)
+  const res = await api.get(
+    `/api/channel_scheduler/channel/${channelId}/config`
+  )
   return res.data
 }
 
@@ -92,13 +95,6 @@ export async function updateSchedulerChannelConfig(
     `/api/channel_scheduler/channel/${channelId}/config`,
     payload
   )
-  return res.data
-}
-
-export async function restoreSchedulerChannel(
-  channelId: number
-): Promise<ApiEnvelope<null>> {
-  const res = await api.post(`/api/channel_scheduler/restore/${channelId}`)
   return res.data
 }
 

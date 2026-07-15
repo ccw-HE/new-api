@@ -102,7 +102,6 @@ export interface SchedulerDisabledChannel {
   status_reason: string
   status_time: number
   scheduler_auto_recover_enabled: boolean
-  manual_restore_allowed: boolean
 }
 
 export interface SchedulerGlobalConfig {
@@ -126,13 +125,11 @@ export interface SchedulerChannelConfig {
   scheduler_retry_times: number | null
   scheduler_auto_disable_seconds: number | null
   scheduler_auto_recover_enabled: boolean | null
-  scheduler_manual_restore_allowed: boolean | null
   effective: {
     scheduler_enabled: boolean
     scheduler_retry_times: number
     scheduler_auto_disable_seconds: number
     scheduler_auto_recover_enabled: boolean
-    scheduler_manual_restore_allowed: boolean
   }
   global: {
     channel_failure_threshold: number
@@ -145,7 +142,6 @@ export interface UpdateSchedulerChannelConfigPayload {
   scheduler_retry_times: number | null
   scheduler_auto_disable_seconds: number | null
   scheduler_auto_recover_enabled: boolean | null
-  scheduler_manual_restore_allowed: boolean | null
 }
 
 export interface ApiEnvelope<T> {

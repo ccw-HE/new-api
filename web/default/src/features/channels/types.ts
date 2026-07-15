@@ -77,7 +77,6 @@ export const channelSchema = z.object({
   scheduler_retry_times: z.number().nullish(),
   scheduler_auto_disable_seconds: z.number().nullish(),
   scheduler_auto_recover_enabled: z.boolean().nullish(),
-  scheduler_manual_restore_allowed: z.boolean().nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
