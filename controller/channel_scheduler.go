@@ -20,7 +20,6 @@ const (
 	minSchedulerDisableSeconds  = 1
 	minSchedulerRetryTimes      = 1
 	minSchedulerRetryJitterMs   = 100
-	schedulerRestoreAuditAction = "channel.scheduler_restore"
 	schedulerChannelCfgAuditKey = "channel.scheduler_config"
 	schedulerGlobalCfgAuditKey  = "scheduler.config_update"
 )
@@ -103,21 +102,19 @@ func GetChannelSchedulerChannelConfig(c *gin.Context) {
 	}
 	globalSetting := operation_setting.GetChannelSchedulerSetting()
 	common.ApiSuccess(c, gin.H{
-		"channel_id":                       channel.Id,
-		"channel_name":                     channel.Name,
-		"status":                           channel.Status,
-		"auto_disabled_until":              channel.AutoDisabledUntil,
-		"scheduler_enabled":                channel.SchedulerEnabled,
-		"scheduler_retry_times":            channel.SchedulerRetryTimes,
-		"scheduler_auto_disable_seconds":   channel.SchedulerAutoDisableSeconds,
-		"scheduler_auto_recover_enabled":   channel.SchedulerAutoRecoverEnabled,
-		"scheduler_manual_restore_allowed": channel.SchedulerManualRestoreAllowed,
+		"channel_id":                     channel.Id,
+		"channel_name":                   channel.Name,
+		"status":                         channel.Status,
+		"auto_disabled_until":            channel.AutoDisabledUntil,
+		"scheduler_enabled":              channel.SchedulerEnabled,
+		"scheduler_retry_times":          channel.SchedulerRetryTimes,
+		"scheduler_auto_disable_seconds": channel.SchedulerAutoDisableSeconds,
+		"scheduler_auto_recover_enabled": channel.SchedulerAutoRecoverEnabled,
 		"effective": gin.H{
-			"scheduler_enabled":                channel.GetSchedulerEnabled(),
-			"scheduler_retry_times":            channel.ResolveSchedulerRetryTimes(globalSetting.ChannelFailureThreshold),
-			"scheduler_auto_disable_seconds":   channel.ResolveSchedulerAutoDisableSeconds(globalSetting.AutoDisableSeconds),
-			"scheduler_auto_recover_enabled":   channel.GetSchedulerAutoRecoverEnabled(),
-			"scheduler_manual_restore_allowed": channel.GetSchedulerManualRestoreAllowed(),
+			"scheduler_enabled":              channel.GetSchedulerEnabled(),
+			"scheduler_retry_times":          channel.ResolveSchedulerRetryTimes(globalSetting.ChannelFailureThreshold),
+			"scheduler_auto_disable_seconds": channel.ResolveSchedulerAutoDisableSeconds(globalSetting.AutoDisableSeconds),
+			"scheduler_auto_recover_enabled": channel.GetSchedulerAutoRecoverEnabled(),
 		},
 		"global": gin.H{
 			"channel_failure_threshold": globalSetting.ChannelFailureThreshold,
@@ -127,11 +124,10 @@ func GetChannelSchedulerChannelConfig(c *gin.Context) {
 }
 
 type channelSchedulerChannelConfigRequest struct {
-	SchedulerEnabled              *bool `json:"scheduler_enabled"`
-	SchedulerRetryTimes           *int  `json:"scheduler_retry_times"`
-	SchedulerAutoDisableSeconds   *int  `json:"scheduler_auto_disable_seconds"`
-	SchedulerAutoRecoverEnabled   *bool `json:"scheduler_auto_recover_enabled"`
-	SchedulerManualRestoreAllowed *bool `json:"scheduler_manual_restore_allowed"`
+	SchedulerEnabled            *bool `json:"scheduler_enabled"`
+	SchedulerRetryTimes         *int  `json:"scheduler_retry_times"`
+	SchedulerAutoDisableSeconds *int  `json:"scheduler_auto_disable_seconds"`
+	SchedulerAutoRecoverEnabled *bool `json:"scheduler_auto_recover_enabled"`
 }
 
 // UpdateChannelSchedulerChannelConfig 保存某渠道的调度配置（Root）。
@@ -161,11 +157,10 @@ func UpdateChannelSchedulerChannelConfig(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{
-		"scheduler_enabled":                nil,
-		"scheduler_retry_times":            nil,
-		"scheduler_auto_disable_seconds":   nil,
-		"scheduler_auto_recover_enabled":   nil,
-		"scheduler_manual_restore_allowed": nil,
+		"scheduler_enabled":              nil,
+		"scheduler_retry_times":          nil,
+		"scheduler_auto_disable_seconds": nil,
+		"scheduler_auto_recover_enabled": nil,
 	}
 	if req.SchedulerEnabled != nil {
 		updates["scheduler_enabled"] = *req.SchedulerEnabled
@@ -179,9 +174,6 @@ func UpdateChannelSchedulerChannelConfig(c *gin.Context) {
 	if req.SchedulerAutoRecoverEnabled != nil {
 		updates["scheduler_auto_recover_enabled"] = *req.SchedulerAutoRecoverEnabled
 	}
-	if req.SchedulerManualRestoreAllowed != nil {
-		updates["scheduler_manual_restore_allowed"] = *req.SchedulerManualRestoreAllowed
-	}
 	if err := model.DB.Model(&model.Channel{}).Where("id = ?", channelId).Updates(updates).Error; err != nil {
 		common.ApiError(c, err)
 		return
@@ -191,23 +183,6 @@ func UpdateChannelSchedulerChannelConfig(c *gin.Context) {
 	recordManageAudit(c, schedulerChannelCfgAuditKey, map[string]interface{}{
 		"id":   channel.Id,
 		"name": channel.Name,
-	})
-	common.ApiSuccess(c, nil)
-}
-
-// RestoreSchedulerChannel 手动恢复某个调度器临时禁用的渠道（Root）。
-func RestoreSchedulerChannel(c *gin.Context) {
-	channelId, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if err := service.ManualRestoreSchedulerChannel(channelId, c.GetInt("id"), c.GetString("username")); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	recordManageAudit(c, schedulerRestoreAuditAction, map[string]interface{}{
-		"id": channelId,
 	})
 	common.ApiSuccess(c, nil)
 }

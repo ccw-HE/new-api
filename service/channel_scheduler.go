@@ -43,10 +43,6 @@ type schedulerGroupCandidates struct {
 	buckets []*model.ChannelPriorityBucket
 }
 
-const (
-	schedulerMaxEffectiveAttemptsPerRequest = 10000
-)
-
 type SchedulerFailureDisposition string
 
 const (
@@ -71,8 +67,8 @@ type ChannelSchedulerSession struct {
 	currentGroup  string
 	failures      map[int]int
 	excluded      map[int]bool
-	totalAttempts int
-	attemptBudget int
+	totalAttempts int64
+	attemptBudget int64
 }
 
 // NewChannelSchedulerSession 创建会话并加载候选渠道。
@@ -124,50 +120,27 @@ func (s *ChannelSchedulerSession) ensureFailoverAttemptBudget(initial *model.Cha
 	if initial == nil {
 		return
 	}
-	attemptBudget := 0
-	fuseReached := false
+	var attemptBudget int64
 	seen := map[int]bool{}
-	addThreshold := func(channel *model.Channel) bool {
+	addThreshold := func(channel *model.Channel) {
 		if channel == nil || channel.Status != common.ChannelStatusEnabled || seen[channel.Id] {
-			return false
+			return
 		}
 		seen[channel.Id] = true
-		threshold := channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
-		if threshold >= schedulerMaxEffectiveAttemptsPerRequest-attemptBudget {
-			attemptBudget = schedulerMaxEffectiveAttemptsPerRequest
-			fuseReached = true
-			return true
-		}
-		attemptBudget += threshold
-		return false
+		attemptBudget += int64(channel.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold))
 	}
-	if addThreshold(initial) {
-		s.attemptBudget = attemptBudget
-		common.SysLog(fmt.Sprintf("channel scheduler emergency attempt fuse reached: request_id=%s, max_attempts=%d", s.ctx.GetString(common.RequestIdKey), schedulerMaxEffectiveAttemptsPerRequest))
-		return
-	}
+	addThreshold(initial)
 	for _, group := range s.groups {
 		for _, bucket := range group.buckets {
 			for _, channel := range bucket.Channels {
-				if addThreshold(channel) {
-					break
-				}
+				addThreshold(channel)
 			}
-			if fuseReached {
-				break
-			}
-		}
-		if fuseReached {
-			break
 		}
 	}
 	if attemptBudget == 0 {
-		attemptBudget = initial.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold)
+		attemptBudget = int64(initial.ResolveSchedulerRetryTimes(s.setting.ChannelFailureThreshold))
 	}
 	s.attemptBudget = attemptBudget
-	if fuseReached {
-		common.SysLog(fmt.Sprintf("channel scheduler emergency attempt fuse reached: request_id=%s, max_attempts=%d", s.ctx.GetString(common.RequestIdKey), schedulerMaxEffectiveAttemptsPerRequest))
-	}
 }
 
 // AdoptInitialChannel 把 middleware.Distribute 已选好的首个渠道纳入会话，
@@ -207,7 +180,7 @@ func (s *ChannelSchedulerSession) AdoptInitialChannel(channelId int) *model.Chan
 }
 
 // NextChannel 返回下一个应尝试的渠道。
-// 返回 false 表示候选耗尽或达到内部异常保险丝，应停止重试。
+// 返回 false 表示候选耗尽或完整候选预算已用尽，应停止重试。
 func (s *ChannelSchedulerSession) NextChannel() (*model.Channel, bool) {
 	if s.totalAttempts >= s.attemptBudget {
 		return nil, false
@@ -264,8 +237,8 @@ func (s *ChannelSchedulerSession) NextChannel() (*model.Channel, bool) {
 	return nil, false
 }
 
-// RemainingAttempts 返回完整候选预算内的剩余尝试次数；预算只受内部异常保险丝保护。
-func (s *ChannelSchedulerSession) RemainingAttempts() int {
+// RemainingAttempts 返回完整候选预算内的剩余尝试次数。
+func (s *ChannelSchedulerSession) RemainingAttempts() int64 {
 	remaining := s.attemptBudget - s.totalAttempts
 	if remaining < 0 {
 		return 0
@@ -494,41 +467,6 @@ func RecoverExpiredSchedulerChannels() (int, error) {
 	return recovered, nil
 }
 
-// ManualRestoreSchedulerChannel 管理员手动恢复调度器临时禁用的渠道。
-func ManualRestoreSchedulerChannel(channelId int, operatorId int, operatorName string) error {
-	channel, err := model.GetChannelById(channelId, true)
-	if err != nil {
-		return err
-	}
-	if channel.Status != common.ChannelStatusAutoDisabled || channel.AutoDisabledUntil == 0 {
-		return errors.New("该渠道不处于调度器临时禁用状态")
-	}
-	if !channel.GetSchedulerManualRestoreAllowed() {
-		return errors.New("该渠道已关闭手动恢复")
-	}
-	if channel.AutoDisabledUntil > common.GetTimestamp() {
-		return errors.New("该渠道临时禁用尚未到期")
-	}
-	if !model.SchedulerRecoverChannel(channelId, channel.AutoDisabledUntil) {
-		return errors.New("恢复渠道失败")
-	}
-	model.InitChannelCache()
-	if operation_setting.GetChannelSchedulerSetting().LogEnabled {
-		model.RecordChannelSchedulerLog(&model.ChannelSchedulerLog{
-			EventType:     model.SchedulerEventManualRestore,
-			UserId:        operatorId,
-			Username:      operatorName,
-			ChannelId:     channel.Id,
-			ChannelName:   channel.Name,
-			ChannelType:   channel.Type,
-			Priority:      channel.GetPriority(),
-			DisabledUntil: channel.AutoDisabledUntil,
-			Reason:        "manually restored by admin",
-		})
-	}
-	return nil
-}
-
 // pickWeightedChannel 在同优先级候选内按权重随机选择一个渠道。
 // 权重算法与 model.GetRandomSatisfiedChannel 的缓存路径保持一致（含平滑因子）。
 func pickWeightedChannel(channels []*model.Channel) *model.Channel {
@@ -571,7 +509,6 @@ type SchedulerDisabledChannelView struct {
 	StatusReason                string `json:"status_reason"`
 	StatusTime                  int64  `json:"status_time"`
 	SchedulerAutoRecoverEnabled bool   `json:"scheduler_auto_recover_enabled"`
-	ManualRestoreAllowed        bool   `json:"manual_restore_allowed"`
 }
 
 // ListSchedulerDisabledChannels 当前处于调度器临时禁用状态的渠道列表。
@@ -589,7 +526,6 @@ func ListSchedulerDisabledChannels() ([]SchedulerDisabledChannelView, error) {
 			Priority:                    channel.GetPriority(),
 			AutoDisabledUntil:           channel.AutoDisabledUntil,
 			SchedulerAutoRecoverEnabled: channel.GetSchedulerAutoRecoverEnabled(),
-			ManualRestoreAllowed:        channel.GetSchedulerManualRestoreAllowed(),
 		}
 		otherInfo := channel.GetOtherInfo()
 		if reason, ok := otherInfo["status_reason"].(string); ok {

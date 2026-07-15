@@ -454,7 +454,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func schedulerFailureDisposition(c *gin.Context, apiErr *types.NewAPIError, remainingAttempts int) service.SchedulerFailureDisposition {
+func schedulerFailureDisposition(c *gin.Context, apiErr *types.NewAPIError, remainingAttempts int64) service.SchedulerFailureDisposition {
 	if apiErr == nil || remainingAttempts <= 0 {
 		return service.SchedulerFailureStop
 	}

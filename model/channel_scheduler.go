@@ -71,6 +71,10 @@ func SetChannelAutoDisabledUntil(channelId int, until int64) error {
 // 不存在"status=3 但 until=0"的中间态。前置条件为当前 status=启用（CAS 语义），
 // 因此并发的手动禁用、旧式自动禁用或另一个会话的临时禁用都不会被覆盖。
 func SchedulerTempDisableChannel(channelId int, reason string, until int64) bool {
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
 	changed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var channel Channel
@@ -130,6 +134,10 @@ func SchedulerRecoverChannel(channelId int, expectedUntil int64) bool {
 	if expectedUntil <= 0 || expectedUntil > common.GetTimestamp() {
 		return false
 	}
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
 	changed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&Channel{}).
@@ -168,6 +176,170 @@ func SchedulerRecoverChannel(channelId int, expectedUntil int64) bool {
 		CacheSetChannelAutoDisabledUntil(channelId, 0)
 	}
 	return true
+}
+
+type AdminChannelStatusUpdate struct {
+	Channel                   Channel
+	PreviousStatus            int
+	PreviousAutoDisabledUntil int64
+}
+
+func updateChannelStatusByAdminInTx(tx *gorm.DB, channel *Channel, status int, reason string) (bool, error) {
+	if channel.Status == status && channel.AutoDisabledUntil == 0 {
+		return false, nil
+	}
+	previousStatus := channel.Status
+	previousUntil := channel.AutoDisabledUntil
+	previousOtherInfo := channel.OtherInfo
+	info := channel.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+
+	query := tx.Model(&Channel{}).
+		Where("id = ? AND status = ? AND auto_disabled_until = ?", channel.Id, previousStatus, previousUntil)
+	if previousOtherInfo == "" {
+		query = query.Where("(other_info = ? OR other_info IS NULL)", "")
+	} else {
+		query = query.Where("other_info = ?", previousOtherInfo)
+	}
+	result := query.Updates(map[string]interface{}{
+		"status":              status,
+		"auto_disabled_until": 0,
+		"other_info":          channel.OtherInfo,
+	})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return false, gorm.ErrRecordNotFound
+	}
+	if err := tx.Model(&Ability{}).Where("channel_id = ?", channel.Id).Update("enabled", status == common.ChannelStatusEnabled).Error; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func updateAdminChannelStatusCache(updates []AdminChannelStatusUpdate, status int) {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	for _, update := range updates {
+		CacheUpdateChannelStatus(update.Channel.Id, status)
+		CacheSetChannelAutoDisabledUntil(update.Channel.Id, 0)
+	}
+}
+
+func UpdateChannelStatusByAdmin(channelId int, status int, reason string) (*AdminChannelStatusUpdate, error) {
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
+	var update *AdminChannelStatusUpdate
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var channel Channel
+		if err := tx.Where("id = ?", channelId).Take(&channel).Error; err != nil {
+			return err
+		}
+		previousStatus := channel.Status
+		previousUntil := channel.AutoDisabledUntil
+		changed, err := updateChannelStatusByAdminInTx(tx, &channel, status, reason)
+		if err != nil || !changed {
+			return err
+		}
+		update = &AdminChannelStatusUpdate{
+			Channel:                   channel,
+			PreviousStatus:            previousStatus,
+			PreviousAutoDisabledUntil: previousUntil,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if update != nil {
+		updateAdminChannelStatusCache([]AdminChannelStatusUpdate{*update}, status)
+	}
+	return update, nil
+}
+
+func UpdateChannelStatusesByAdmin(channelIds []int, status int, reason string) ([]AdminChannelStatusUpdate, error) {
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
+	uniqueIds := make(map[int]struct{}, len(channelIds))
+	for _, channelId := range channelIds {
+		uniqueIds[channelId] = struct{}{}
+	}
+	updates := make([]AdminChannelStatusUpdate, 0, len(uniqueIds))
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var channels []Channel
+		if err := tx.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+			return err
+		}
+		if len(channels) != len(uniqueIds) {
+			return gorm.ErrRecordNotFound
+		}
+		for i := range channels {
+			channel := &channels[i]
+			previousStatus := channel.Status
+			previousUntil := channel.AutoDisabledUntil
+			changed, err := updateChannelStatusByAdminInTx(tx, channel, status, reason)
+			if err != nil {
+				return err
+			}
+			if changed {
+				updates = append(updates, AdminChannelStatusUpdate{
+					Channel:                   *channel,
+					PreviousStatus:            previousStatus,
+					PreviousAutoDisabledUntil: previousUntil,
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	updateAdminChannelStatusCache(updates, status)
+	return updates, nil
+}
+
+func EnableChannelsByTagByAdmin(tag string, reason string) ([]AdminChannelStatusUpdate, error) {
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
+	updates := make([]AdminChannelStatusUpdate, 0)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var channels []Channel
+		if err := tx.Where("tag = ?", tag).Find(&channels).Error; err != nil {
+			return err
+		}
+		for i := range channels {
+			channel := &channels[i]
+			previousStatus := channel.Status
+			previousUntil := channel.AutoDisabledUntil
+			changed, err := updateChannelStatusByAdminInTx(tx, channel, common.ChannelStatusEnabled, reason)
+			if err != nil {
+				return err
+			}
+			if changed {
+				updates = append(updates, AdminChannelStatusUpdate{
+					Channel:                   *channel,
+					PreviousStatus:            previousStatus,
+					PreviousAutoDisabledUntil: previousUntil,
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	updateAdminChannelStatusCache(updates, common.ChannelStatusEnabled)
+	return updates, nil
 }
 
 // GetSchedulerTempDisabledChannels 当前处于调度器临时禁用状态的渠道

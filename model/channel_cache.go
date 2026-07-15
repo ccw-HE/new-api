@@ -27,6 +27,8 @@ func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
 	}
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
 	var channels []*Channel

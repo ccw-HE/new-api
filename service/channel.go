@@ -42,6 +42,61 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 	}
 }
 
+func recordAdminManualRestore(update model.AdminChannelStatusUpdate, operatorId int, operatorName string) {
+	if update.PreviousStatus != common.ChannelStatusAutoDisabled || update.PreviousAutoDisabledUntil <= 0 {
+		return
+	}
+	if !operation_setting.GetChannelSchedulerSetting().LogEnabled {
+		return
+	}
+	model.RecordChannelSchedulerLog(&model.ChannelSchedulerLog{
+		EventType:     model.SchedulerEventManualRestore,
+		UserId:        operatorId,
+		Username:      operatorName,
+		ChannelId:     update.Channel.Id,
+		ChannelName:   update.Channel.Name,
+		ChannelType:   update.Channel.Type,
+		Priority:      update.Channel.GetPriority(),
+		DisabledUntil: update.PreviousAutoDisabledUntil,
+		Reason:        "manually restored by admin",
+	})
+}
+
+func UpdateChannelStatusByAdmin(channelId int, status int, operatorId int, operatorName string) (bool, error) {
+	update, err := model.UpdateChannelStatusByAdmin(channelId, status, "manual operation")
+	if err != nil || update == nil {
+		return false, err
+	}
+	if status == common.ChannelStatusEnabled {
+		recordAdminManualRestore(*update, operatorId, operatorName)
+	}
+	return true, nil
+}
+
+func UpdateChannelStatusesByAdmin(channelIds []int, status int, operatorId int, operatorName string) (int, error) {
+	updates, err := model.UpdateChannelStatusesByAdmin(channelIds, status, "manual batch operation")
+	if err != nil {
+		return 0, err
+	}
+	if status == common.ChannelStatusEnabled {
+		for _, update := range updates {
+			recordAdminManualRestore(update, operatorId, operatorName)
+		}
+	}
+	return len(updates), nil
+}
+
+func EnableChannelsByTagByAdmin(tag string, operatorId int, operatorName string) (int, error) {
+	updates, err := model.EnableChannelsByTagByAdmin(tag, "manual tag operation")
+	if err != nil {
+		return 0, err
+	}
+	for _, update := range updates {
+		recordAdminManualRestore(update, operatorId, operatorName)
+	}
+	return len(updates), nil
+}
+
 func ShouldDisableChannel(err *types.NewAPIError) bool {
 	if !common.AutomaticDisableChannelEnabled {
 		return false

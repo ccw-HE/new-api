@@ -62,12 +62,12 @@ type seedChannelOptions struct {
 	priority int64
 	status   int
 	autoBan  int
+	tag      string
 	// 渠道级调度配置，nil 表示继承全局
-	retryTimes           *int
-	disableSeconds       *int
-	autoRecoverEnabled   *bool
-	manualRestoreAllowed *bool
-	autoDisabledUntil    int64
+	retryTimes         *int
+	disableSeconds     *int
+	autoRecoverEnabled *bool
+	autoDisabledUntil  int64
 }
 
 func seedSchedulerChannel(t *testing.T, opts seedChannelOptions) *model.Channel {
@@ -76,21 +76,21 @@ func seedSchedulerChannel(t *testing.T, opts seedChannelOptions) *model.Channel 
 		opts.status = common.ChannelStatusEnabled
 	}
 	channel := &model.Channel{
-		Id:                            opts.id,
-		Name:                          opts.name,
-		Type:                          1,
-		Key:                           "sk-test",
-		Status:                        opts.status,
-		Priority:                      common.GetPointer(opts.priority),
-		Weight:                        common.GetPointer[uint](0),
-		Models:                        schedulerTestModel,
-		Group:                         "default",
-		AutoBan:                       common.GetPointer(opts.autoBan),
-		SchedulerRetryTimes:           opts.retryTimes,
-		SchedulerAutoDisableSeconds:   opts.disableSeconds,
-		SchedulerAutoRecoverEnabled:   opts.autoRecoverEnabled,
-		SchedulerManualRestoreAllowed: opts.manualRestoreAllowed,
-		AutoDisabledUntil:             opts.autoDisabledUntil,
+		Id:                          opts.id,
+		Name:                        opts.name,
+		Type:                        1,
+		Key:                         "sk-test",
+		Status:                      opts.status,
+		Priority:                    common.GetPointer(opts.priority),
+		Weight:                      common.GetPointer[uint](0),
+		Models:                      schedulerTestModel,
+		Group:                       "default",
+		AutoBan:                     common.GetPointer(opts.autoBan),
+		Tag:                         common.GetPointer(opts.tag),
+		SchedulerRetryTimes:         opts.retryTimes,
+		SchedulerAutoDisableSeconds: opts.disableSeconds,
+		SchedulerAutoRecoverEnabled: opts.autoRecoverEnabled,
+		AutoDisabledUntil:           opts.autoDisabledUntil,
 	}
 	require.NoError(t, model.DB.Create(channel).Error)
 	require.NoError(t, channel.AddAbilities(nil))
@@ -424,10 +424,10 @@ func TestSchedulerSessionExhaustsChannelRetryThresholdBeyondConfiguredRequestCap
 		channel = next
 	}
 	assert.Equal(t, 100, attempts)
-	assert.Equal(t, 0, session.RemainingAttempts())
+	assert.EqualValues(t, 0, session.RemainingAttempts())
 }
 
-func TestSchedulerSessionInternalFuseStopsPathologicalCandidateSet(t *testing.T) {
+func TestSchedulerSessionAttemptBudgetUsesFullCandidateThresholdSum(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -462,21 +462,7 @@ func TestSchedulerSessionInternalFuseStopsPathologicalCandidateSet(t *testing.T)
 		excluded:     make(map[int]bool),
 	}
 	session.ensureFailoverAttemptBudget(channels[0])
-
-	attempts := 0
-	channel := channels[0]
-	for {
-		attempts++
-		session.RecordFailure(channel, mockUpstreamError(), SchedulerFailureRetryCurrent)
-		next, ok := session.NextChannel()
-		if !ok {
-			break
-		}
-		channel = next
-	}
-
-	assert.Equal(t, schedulerMaxEffectiveAttemptsPerRequest, attempts)
-	assert.Equal(t, 0, session.RemainingAttempts())
+	assert.EqualValues(t, 10100, session.RemainingAttempts())
 }
 
 func TestSchedulerSessionLowConfiguredMaxAttemptsDoesNotCutOffFailover(t *testing.T) {
@@ -802,33 +788,83 @@ func TestRecoverExpiredSchedulerChannels(t *testing.T) {
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventAutoRecover, expired.Id))
 
 	// 关闭自动恢复的渠道可以手动恢复
-	require.NoError(t, ManualRestoreSchedulerChannel(noRecover.Id, 1, "root"))
+	changed, err := UpdateChannelStatusByAdmin(noRecover.Id, common.ChannelStatusEnabled, 1, "root")
+	require.NoError(t, err)
+	require.True(t, changed)
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, noRecover.Id).Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventManualRestore, noRecover.Id))
 }
 
-func TestManualRestoreRules(t *testing.T) {
+func TestAdminCanRestoreSchedulerDisabledChannelImmediately(t *testing.T) {
 	schedulerCleanup(t)
 	now := common.GetTimestamp()
-	// 不允许手动恢复
-	blocked := seedSchedulerChannel(t, seedChannelOptions{id: 311, name: "blocked", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000, manualRestoreAllowed: common.GetPointer(false)})
-	notExpired := seedSchedulerChannel(t, seedChannelOptions{id: 313, name: "not-expired", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+	// 管理员可以在禁用到期前立即恢复
+	blocked := seedSchedulerChannel(t, seedChannelOptions{id: 311, name: "blocked", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
 	// 手动禁用渠道不属于调度器临时禁用
-	manual := seedSchedulerChannel(t, seedChannelOptions{id: 312, name: "manual", priority: 3, autoBan: 1, status: common.ChannelStatusManuallyDisabled})
 
-	err := ManualRestoreSchedulerChannel(blocked.Id, 1, "root")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "手动恢复")
-	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, blocked.Id).Status)
+	changed, err := UpdateChannelStatusByAdmin(blocked.Id, common.ChannelStatusEnabled, 7, "admin")
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, blocked.Id).Status)
+	assert.EqualValues(t, 0, reloadChannel(t, blocked.Id).AutoDisabledUntil)
+	assert.True(t, abilityEnabled(t, blocked.Id))
+	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventManualRestore, blocked.Id))
 
-	err = ManualRestoreSchedulerChannel(notExpired.Id, 1, "root")
-	require.Error(t, err)
-	assert.Equal(t, common.ChannelStatusAutoDisabled, reloadChannel(t, notExpired.Id).Status)
-	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventManualRestore, notExpired.Id))
+}
 
-	err = ManualRestoreSchedulerChannel(manual.Id, 1, "root")
+func TestAdminChannelStatusUpdateRollsBackWhenAbilityUpdateFails(t *testing.T) {
+	schedulerCleanup(t)
+	if model.DB.Dialector.Name() != "sqlite" {
+		t.Skip("ability rollback fixture uses a SQLite trigger")
+	}
+	now := common.GetTimestamp()
+	channel := seedSchedulerChannel(t, seedChannelOptions{id: 317, name: "rollback", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+	require.NoError(t, model.DB.Exec(`CREATE TRIGGER fail_scheduler_restore_ability BEFORE UPDATE ON abilities BEGIN SELECT RAISE(FAIL, 'ability update failed'); END`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec(`DROP TRIGGER IF EXISTS fail_scheduler_restore_ability`)
+	})
+
+	changed, err := UpdateChannelStatusByAdmin(channel.Id, common.ChannelStatusEnabled, 7, "admin")
 	require.Error(t, err)
-	assert.Equal(t, common.ChannelStatusManuallyDisabled, reloadChannel(t, manual.Id).Status)
+	assert.False(t, changed)
+	reloaded := reloadChannel(t, channel.Id)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
+	assert.Equal(t, now+5000, reloaded.AutoDisabledUntil)
+	assert.False(t, abilityEnabled(t, channel.Id))
+	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventManualRestore, channel.Id))
+}
+
+func TestAdminEnableChannelsByTagRecordsSchedulerRestores(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	first := seedSchedulerChannel(t, seedChannelOptions{id: 318, name: "tag-a", priority: 3, autoBan: 1, tag: "restore", status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+	second := seedSchedulerChannel(t, seedChannelOptions{id: 319, name: "tag-b", priority: 3, autoBan: 1, tag: "restore", status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+
+	changedCount, err := EnableChannelsByTagByAdmin("restore", 7, "admin")
+	require.NoError(t, err)
+	assert.Equal(t, 2, changedCount)
+	for _, channel := range []*model.Channel{first, second} {
+		reloaded := reloadChannel(t, channel.Id)
+		assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
+		assert.EqualValues(t, 0, reloaded.AutoDisabledUntil)
+		assert.True(t, abilityEnabled(t, channel.Id))
+		assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventManualRestore, channel.Id))
+	}
+}
+
+func TestAdminBatchChannelStatusUpdateIsAtomic(t *testing.T) {
+	schedulerCleanup(t)
+	now := common.GetTimestamp()
+	channel := seedSchedulerChannel(t, seedChannelOptions{id: 320, name: "batch", priority: 3, autoBan: 1, status: common.ChannelStatusAutoDisabled, autoDisabledUntil: now + 5000})
+
+	changedCount, err := UpdateChannelStatusesByAdmin([]int{channel.Id, 999999}, common.ChannelStatusEnabled, 7, "admin")
+	require.Error(t, err)
+	assert.Zero(t, changedCount)
+	reloaded := reloadChannel(t, channel.Id)
+	assert.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
+	assert.Equal(t, now+5000, reloaded.AutoDisabledUntil)
+	assert.False(t, abilityEnabled(t, channel.Id))
+	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventManualRestore, channel.Id))
 }
 
 func TestHasSchedulerTempDisabledChannelsRequiresRecoverableChannel(t *testing.T) {

@@ -789,14 +789,18 @@ func EnableTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	err = model.EnableChannelByTag(channelTag.Tag)
+	changedCount, err := service.EnableChannelsByTagByAdmin(channelTag.Tag, c.GetInt("id"), c.GetString("username"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	model.InitChannelCache()
+	if changedCount > 0 {
+		model.InitChannelCache()
+		service.ResetProxyClientCache()
+	}
 	recordManageAudit(c, "channel.tag_enable", map[string]interface{}{
-		"tag": channelTag.Tag,
+		"tag":     channelTag.Tag,
+		"changed": changedCount,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1096,7 +1100,11 @@ func UpdateChannelStatus(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	changed := model.UpdateChannelStatus(id, "", req.Status, "manual operation")
+	changed, err := service.UpdateChannelStatusByAdmin(id, req.Status, c.GetInt("id"), c.GetString("username"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if changed {
 		model.InitChannelCache()
 		service.ResetProxyClientCache()
@@ -1119,11 +1127,10 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	changedCount := 0
-	for _, id := range req.Ids {
-		if model.UpdateChannelStatus(id, "", req.Status, "manual batch operation") {
-			changedCount++
-		}
+	changedCount, err := service.UpdateChannelStatusesByAdmin(req.Ids, req.Status, c.GetInt("id"), c.GetString("username"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	if changedCount > 0 {
 		model.InitChannelCache()

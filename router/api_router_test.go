@@ -26,7 +26,7 @@ func TestChannelSchedulerRoutesIncludeHyphenCompatibleAliases(t *testing.T) {
 	require.Contains(t, routes, "PUT /api/channel_scheduler/config")
 	require.Contains(t, routes, "GET /api/channel_scheduler/channel/:id/config")
 	require.Contains(t, routes, "PUT /api/channel_scheduler/channel/:id/config")
-	require.Contains(t, routes, "POST /api/channel_scheduler/restore/:id")
+	assert.NotContains(t, routes, "POST /api/channel_scheduler/restore/:id")
 
 	assert.Contains(t, routes, "GET /api/channel-scheduler/logs")
 	assert.Contains(t, routes, "GET /api/channel-scheduler/logs/stat")
@@ -36,7 +36,7 @@ func TestChannelSchedulerRoutesIncludeHyphenCompatibleAliases(t *testing.T) {
 	assert.Contains(t, routes, "PUT /api/channel-scheduler/config")
 	assert.Contains(t, routes, "GET /api/channel-scheduler/channel/:id/config")
 	assert.Contains(t, routes, "PUT /api/channel-scheduler/channel/:id/config")
-	assert.Contains(t, routes, "POST /api/channel-scheduler/restore/:id")
+	assert.NotContains(t, routes, "POST /api/channel-scheduler/restore/:id")
 }
 
 func TestChannelListRouteAcceptsNoTrailingSlash(t *testing.T) {

@@ -56,12 +56,11 @@ type Channel struct {
 	// 高级调度器字段。AutoDisabledUntil 为调度器临时禁用的到期时间戳（秒），
 	// 0 表示不处于调度器临时禁用状态（旧式 auto disabled 渠道保持 0，不会被自动恢复）。
 	// 渠道级调度配置全部使用指针：nil 表示继承全局默认，避免把 0 同时当作"关闭"和"未设置"。
-	AutoDisabledUntil             int64 `json:"auto_disabled_until" gorm:"bigint;default:0;index"`
-	SchedulerEnabled              *bool `json:"scheduler_enabled"`
-	SchedulerRetryTimes           *int  `json:"scheduler_retry_times"`
-	SchedulerAutoDisableSeconds   *int  `json:"scheduler_auto_disable_seconds"`
-	SchedulerAutoRecoverEnabled   *bool `json:"scheduler_auto_recover_enabled"`
-	SchedulerManualRestoreAllowed *bool `json:"scheduler_manual_restore_allowed"`
+	AutoDisabledUntil           int64 `json:"auto_disabled_until" gorm:"bigint;default:0;index"`
+	SchedulerEnabled            *bool `json:"scheduler_enabled"`
+	SchedulerRetryTimes         *int  `json:"scheduler_retry_times"`
+	SchedulerAutoDisableSeconds *int  `json:"scheduler_auto_disable_seconds"`
+	SchedulerAutoRecoverEnabled *bool `json:"scheduler_auto_recover_enabled"`
 
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
@@ -366,14 +365,6 @@ func (channel *Channel) GetSchedulerAutoRecoverEnabled() bool {
 		return true
 	}
 	return *channel.SchedulerAutoRecoverEnabled
-}
-
-// GetSchedulerManualRestoreAllowed 是否允许管理员手动恢复，nil 表示允许。
-func (channel *Channel) GetSchedulerManualRestoreAllowed() bool {
-	if channel.SchedulerManualRestoreAllowed == nil {
-		return true
-	}
-	return *channel.SchedulerManualRestoreAllowed
 }
 
 const maxChannelSchedulerRetryTimes = 100
@@ -840,18 +831,6 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		CacheSetChannelAutoDisabledUntil(channelId, 0)
 	}
 	return true
-}
-
-func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(map[string]interface{}{
-		"status":              common.ChannelStatusEnabled,
-		"auto_disabled_until": 0,
-	}).Error
-	if err != nil {
-		return err
-	}
-	err = UpdateAbilityStatusByTag(tag, true)
-	return err
 }
 
 func DisableChannelByTag(tag string) error {

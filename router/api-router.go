@@ -285,7 +285,6 @@ func SetApiRouter(router *gin.Engine) {
 				channelSchedulerRoute.PUT("/config", middleware.RootAuth(), controller.UpdateChannelSchedulerConfig)
 				channelSchedulerRoute.GET("/channel/:id/config", middleware.AdminAuth(), controller.GetChannelSchedulerChannelConfig)
 				channelSchedulerRoute.PUT("/channel/:id/config", middleware.RootAuth(), controller.UpdateChannelSchedulerChannelConfig)
-				channelSchedulerRoute.POST("/restore/:id", middleware.RootAuth(), controller.RestoreSchedulerChannel)
 			}
 		}
 
