@@ -29,9 +29,11 @@ We take security vulnerability reports very seriously. If you discover a securit
 
 **Do NOT** report security vulnerabilities in public GitHub Issues.
 
-To report a security issue, please use the GitHub Security Advisories tab to "[Open a draft security advisory](https://github.com/QuantumNous/new-api/security/advisories/new)". This is the preferred method as it provides a built-in private communication channel.
+For vulnerabilities in the scheduling, failover, Windows development scripts, or other changes maintained by this fork, [open a private security advisory in ccw-HE/new-api](https://github.com/ccw-HE/new-api/security/advisories/new).
 
-Alternatively, you can report via email:
+For vulnerabilities that also affect the upstream project, [open a private security advisory in QuantumNous/new-api](https://github.com/QuantumNous/new-api/security/advisories/new). This keeps upstream issues in the upstream security process while fork-specific reports reach the correct maintainer.
+
+Upstream vulnerabilities can also be reported by email:
 
 - **Email:** [support@quantumnous.com](mailto:support@quantumnous.com)
 - **Subject:** `[SECURITY] Security Vulnerability Report`
