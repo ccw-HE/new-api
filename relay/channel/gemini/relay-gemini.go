@@ -1671,6 +1671,9 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string) ([]string, error) {
 		if nextPageToken != "" {
 			url = fmt.Sprintf("%s?pageToken=%s", url, nextPageToken)
 		}
+		if err := service.ValidateOutboundURL(url); err != nil {
+			return nil, fmt.Errorf("上游地址被安全策略拒绝: %v", err)
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		request, err := http.NewRequestWithContext(ctx, "GET", url, nil)

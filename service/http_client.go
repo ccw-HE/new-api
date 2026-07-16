@@ -21,16 +21,30 @@ var (
 	proxyClients    = make(map[string]*http.Client)
 )
 
-func checkRedirect(req *http.Request, via []*http.Request) error {
-	fetchSetting := system_setting.GetFetchSetting()
+func CheckRedirect(req *http.Request, via []*http.Request) error {
 	urlStr := req.URL.String()
-	if err := common.ValidateURLWithFetchSetting(urlStr, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+	if err := ValidateOutboundURL(urlStr); err != nil {
 		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
 	}
 	if len(via) >= 10 {
 		return fmt.Errorf("stopped after 10 redirects")
 	}
 	return nil
+}
+
+func ValidateOutboundURL(urlStr string) error {
+	fetchSetting := system_setting.GetFetchSetting()
+	return common.ValidateURLWithFetchSetting(
+		urlStr,
+		fetchSetting.EnableSSRFProtection,
+		fetchSetting.AllowPrivateIp,
+		fetchSetting.DomainFilterMode,
+		fetchSetting.IpFilterMode,
+		fetchSetting.DomainList,
+		fetchSetting.IpList,
+		fetchSetting.AllowedPorts,
+		fetchSetting.ApplyIPFilterForDomain,
+	)
 }
 
 func InitHttpClient() {
@@ -48,13 +62,13 @@ func InitHttpClient() {
 	if common.RelayTimeout == 0 {
 		httpClient = &http.Client{
 			Transport:     transport,
-			CheckRedirect: checkRedirect,
+			CheckRedirect: CheckRedirect,
 		}
 	} else {
 		httpClient = &http.Client{
 			Transport:     transport,
 			Timeout:       time.Duration(common.RelayTimeout) * time.Second,
-			CheckRedirect: checkRedirect,
+			CheckRedirect: CheckRedirect,
 		}
 	}
 }
@@ -118,7 +132,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 		}
 		client := &http.Client{
 			Transport:     transport,
-			CheckRedirect: checkRedirect,
+			CheckRedirect: CheckRedirect,
 		}
 		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
 		proxyClientLock.Lock()
@@ -159,7 +173,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 			transport.TLSClientConfig = common.InsecureTLSConfig
 		}
 
-		client := &http.Client{Transport: transport, CheckRedirect: checkRedirect}
+		client := &http.Client{Transport: transport, CheckRedirect: CheckRedirect}
 		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
 		proxyClientLock.Lock()
 		proxyClients[proxyURL] = client

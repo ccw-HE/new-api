@@ -1022,7 +1022,7 @@ func UpdateChannel(c *gin.Context) {
 					}
 				}
 
-				seen := make(map[string]struct{}, len(existingKeys)+len(newKeys))
+				seen := make(map[string]struct{})
 				for _, key := range existingKeys {
 					normalized := strings.TrimSpace(key)
 					if normalized == "" {
@@ -1030,7 +1030,7 @@ func UpdateChannel(c *gin.Context) {
 					}
 					seen[normalized] = struct{}{}
 				}
-				dedupedNewKeys := make([]string, 0, len(newKeys))
+				dedupedNewKeys := make([]string, 0)
 				for _, key := range newKeys {
 					normalized := strings.TrimSpace(key)
 					if normalized == "" {
@@ -1182,6 +1182,13 @@ func FetchModels(c *gin.Context) {
 	if baseURL == "" {
 		baseURL = constant.ChannelBaseURLs[req.Type]
 	}
+	if err := service.ValidateOutboundURL(baseURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "上游地址被安全策略拒绝: " + err.Error(),
+		})
+		return
+	}
 
 	// remove line breaks and extra spaces.
 	key := strings.TrimSpace(req.Key)
@@ -1226,7 +1233,7 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: service.CheckRedirect}
 	url := fmt.Sprintf("%s/v1/models", baseURL)
 
 	request, err := http.NewRequest("GET", url, nil)

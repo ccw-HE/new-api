@@ -267,6 +267,42 @@ func withSMTPSettings(t *testing.T) {
 	})
 }
 
+func TestSendEmailRejectsRecipientHeaderInjection(t *testing.T) {
+	withSMTPSettings(t)
+
+	SMTPServer = "127.0.0.1"
+	SMTPPort = 1
+	SMTPFrom = "sender@example.com"
+	SystemName = "New API"
+
+	err := SendEmail("Verification", "receiver@example.com\r\nBcc: attacker@example.com", "<p>123456</p>")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid email recipient")
+}
+
+func TestSendEmailEscapesSenderDisplayName(t *testing.T) {
+	server := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer server.close()
+	withSMTPSettings(t)
+
+	SMTPServer = server.host
+	SMTPPort = server.port
+	SMTPSSLEnabled = false
+	SMTPStartTLSEnabled = false
+	SMTPFrom = "sender@example.com"
+	SystemName = "New API\r\nBcc: attacker@example.com"
+
+	err := SendEmail("Verification", "receiver@example.com", "<p>123456</p>")
+	require.NoError(t, err)
+
+	select {
+	case message := <-server.messages:
+		require.NotContains(t, message, "\r\nBcc:")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for SMTP DATA")
+	}
+}
+
 func TestSendEmailUsesExplicitStartTLSWithInsecureCertificate(t *testing.T) {
 	server := newFakeSMTPServer(t)
 	defer server.close()

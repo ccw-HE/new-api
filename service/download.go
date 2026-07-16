@@ -29,9 +29,7 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("only support https url")
 	}
 
-	// SSRF防护：验证请求URL
-	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(req.URL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+	if err := ValidateOutboundURL(req.URL); err != nil {
 		return nil, fmt.Errorf("request reject: %v", err)
 	}
 
@@ -39,9 +37,12 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 	if !strings.HasSuffix(workerUrl, "/") {
 		workerUrl += "/"
 	}
+	if err := ValidateOutboundURL(workerUrl); err != nil {
+		return nil, fmt.Errorf("worker URL rejected: %v", err)
+	}
 
 	// 序列化worker请求数据
-	workerPayload, err := json.Marshal(req)
+	workerPayload, err := common.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal worker payload: %v", err)
 	}
@@ -58,9 +59,7 @@ func DoDownloadRequest(originUrl string, reason ...string) (resp *http.Response,
 		}
 		return DoWorkerRequest(req)
 	} else {
-		// SSRF防护：验证请求URL（非Worker模式）
-		fetchSetting := system_setting.GetFetchSetting()
-		if err := common.ValidateURLWithFetchSetting(originUrl, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		if err := ValidateOutboundURL(originUrl); err != nil {
 			return nil, fmt.Errorf("request reject: %v", err)
 		}
 

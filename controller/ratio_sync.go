@@ -21,6 +21,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/samber/lo"
@@ -215,7 +216,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: transport, CheckRedirect: service.CheckRedirect}
 
 	for _, chn := range upstreams {
 		wg.Add(1)
@@ -250,6 +251,10 @@ func FetchUpstreamRatios(c *gin.Context) {
 
 			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(req.Timeout)*time.Second)
 			defer cancel()
+			if err := service.ValidateOutboundURL(fullURL); err != nil {
+				ch <- upstreamResult{Name: uniqueName, Err: "upstream URL rejected: " + err.Error()}
+				return
+			}
 
 			httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 			if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -165,6 +166,10 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 		common.ApiErrorMsg(c, "Discovery URL 无效，仅支持 http/https")
 		return
 	}
+	if err := service.ValidateOutboundURL(targetURL); err != nil {
+		common.ApiErrorMsg(c, "Discovery URL 被安全策略拒绝: "+err.Error())
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
@@ -176,7 +181,7 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 	}
 	httpReq.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: service.CheckRedirect}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		common.ApiErrorMsg(c, "获取 Discovery 配置失败: "+err.Error())

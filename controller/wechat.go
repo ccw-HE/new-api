@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -26,13 +27,18 @@ func getWeChatIdByCode(code string) (string, error) {
 	if code == "" {
 		return "", errors.New("无效的参数")
 	}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/wechat/user?code=%s", common.WeChatServerAddress, url.QueryEscape(code)), nil)
+	requestURL := fmt.Sprintf("%s/api/wechat/user?code=%s", common.WeChatServerAddress, url.QueryEscape(code))
+	if err := service.ValidateOutboundURL(requestURL); err != nil {
+		return "", fmt.Errorf("WeChat server URL rejected: %w", err)
+	}
+	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", common.WeChatServerToken)
 	client := http.Client{
-		Timeout: 5 * time.Second,
+		Timeout:       5 * time.Second,
+		CheckRedirect: service.CheckRedirect,
 	}
 	httpResponse, err := client.Do(req)
 	if err != nil {

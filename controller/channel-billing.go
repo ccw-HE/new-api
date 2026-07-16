@@ -137,6 +137,9 @@ func GetClaudeAuthHeader(token string) http.Header {
 }
 
 func GetResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
+	if err := service.ValidateOutboundURL(url); err != nil {
+		return nil, fmt.Errorf("upstream URL rejected: %w", err)
+	}
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err

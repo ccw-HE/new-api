@@ -62,7 +62,7 @@ func (l *InMemoryRateLimiter) Request(key string, maxRequestNum int, duration in
 			}
 		}
 	} else {
-		s := make([]int64, 0, maxRequestNum)
+		s := make([]int64, 0)
 		l.store[key] = &s
 		*(l.store[key]) = append(*(l.store[key]), now)
 	}

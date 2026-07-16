@@ -1140,7 +1140,7 @@ func resolveHeaderOverrideValueByMapping(context map[string]interface{}, headerN
 	}
 
 	wildcardValue, hasWildcard := mapping["*"]
-	resultTokens := make([]string, 0, len(sourceTokens)+len(appendTokens))
+	resultTokens := make([]string, 0)
 	for _, token := range sourceTokens {
 		replacementRaw, hasReplacement := mapping[token]
 		if !hasReplacement && hasWildcard && !keepOnlyDeclared {
