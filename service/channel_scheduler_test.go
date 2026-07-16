@@ -120,7 +120,10 @@ func mockUpstreamError() *types.NewAPIError {
 func countSchedulerLogs(t *testing.T, eventType string, channelId int) int64 {
 	t.Helper()
 	var count int64
-	tx := model.DB.Model(&model.ChannelSchedulerLog{}).Where("event_type = ?", eventType)
+	tx := model.DB.Model(&model.ChannelSchedulerLog{})
+	if eventType != "" {
+		tx = tx.Where("event_type = ?", eventType)
+	}
 	if channelId != 0 {
 		tx = tx.Where("channel_id = ?", channelId)
 	}
@@ -273,7 +276,7 @@ func TestSchedulerSessionTwoFailuresNoDisable(t *testing.T) {
 	assert.Equal(t, chA.Id, next.Id)
 }
 
-// auto_ban=false：不禁用但记录 observe_disable 日志，且会话内排除
+// auto_ban=false：不禁用渠道，但仍会在当前会话内排除
 func TestSchedulerSessionAutoBanFalse(t *testing.T) {
 	schedulerCleanup(t)
 	withSchedulerSetting(t, func(s *operation_setting.ChannelSchedulerSetting) {
@@ -293,7 +296,7 @@ func TestSchedulerSessionAutoBanFalse(t *testing.T) {
 	reloaded := reloadChannel(t, chA.Id)
 	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
 	assert.EqualValues(t, 0, reloaded.AutoDisabledUntil)
-	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
+	assert.EqualValues(t, 3, countSchedulerLogs(t, "", chA.Id))
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
 
 	next, ok := session.NextChannel()
@@ -338,7 +341,6 @@ func TestSchedulerSessionNonRetryableFailure(t *testing.T) {
 	assert.Equal(t, common.ChannelStatusEnabled, reloaded.Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
-	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
 }
 
 func TestSchedulerSessionImmediateFailoverTemporarilyDisablesChannel(t *testing.T) {
@@ -394,7 +396,6 @@ func TestSchedulerSessionDoRequestFailedDoesNotTempDisableChannel(t *testing.T) 
 	assert.Equal(t, common.ChannelStatusEnabled, reloadChannel(t, chA.Id).Status)
 	assert.EqualValues(t, 1, countSchedulerLogs(t, model.SchedulerEventFailure, chA.Id))
 	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventAutoDisable, chA.Id))
-	assert.EqualValues(t, 0, countSchedulerLogs(t, model.SchedulerEventObserveDisable, chA.Id))
 
 	next, ok := session.NextChannel()
 	require.True(t, ok)

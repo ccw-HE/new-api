@@ -332,42 +332,18 @@ func (s *ChannelSchedulerSession) RecordFailure(channel *model.Channel, apiErr *
 	// 达到阈值：移出本会话候选（无论是否执行数据库层面的禁用）
 	s.ExcludeChannel(channel.Id)
 
-	skipReason := ""
-	if !channel.GetSchedulerEnabled() {
-		skipReason = "channel scheduler disabled (scheduler_enabled=false)"
-	} else if s.setting.RespectAutoBan && !channel.GetAutoBan() {
-		skipReason = "channel auto_ban disabled"
-	}
-
-	if skipReason != "" {
-		if s.setting.LogEnabled {
-			entry := s.buildLogEntry(channel, apiErr)
-			entry.EventType = model.SchedulerEventObserveDisable
-			entry.AttemptCount = attemptCount
-			entry.Metadata = common.MapToJsonStr(map[string]interface{}{
-				"skip_reason":    skipReason,
-				"total_attempts": s.totalAttempts,
-			})
-			model.RecordChannelSchedulerLog(entry)
-		}
+	if !channel.GetSchedulerEnabled() || (s.setting.RespectAutoBan && !channel.GetAutoBan()) {
 		return
 	}
 
 	seconds := channel.ResolveSchedulerAutoDisableSeconds(s.setting.AutoDisableSeconds)
 	disabledUntil, disabled := TempDisableChannelForScheduler(channel, apiErr, seconds)
-	if s.setting.LogEnabled {
+	if s.setting.LogEnabled && disabled {
 		entry := s.buildLogEntry(channel, apiErr)
+		entry.EventType = model.SchedulerEventAutoDisable
 		entry.AttemptCount = attemptCount
 		entry.DisableDurationSeconds = seconds
 		entry.DisabledUntil = disabledUntil
-		if disabled {
-			entry.EventType = model.SchedulerEventAutoDisable
-		} else {
-			entry.EventType = model.SchedulerEventObserveDisable
-			entry.Metadata = common.MapToJsonStr(map[string]interface{}{
-				"skip_reason": "channel already disabled by concurrent request or status changed",
-			})
-		}
 		model.RecordChannelSchedulerLog(entry)
 	}
 }

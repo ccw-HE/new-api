@@ -9,17 +9,15 @@ import (
 )
 
 // 调度日志事件类型。
-// failure: 单次渠道失败（观察与正式模式均记录，受 log_enabled 控制）
-// observe_disable: 达到阈值但未执行禁用（观察模式 / auto_ban 关闭 / 渠道不参与调度）
+// failure: 单次渠道失败（受 log_enabled 控制）
 // auto_disable: 达到阈值并已执行临时禁用
 // auto_recover: 临时禁用到期自动恢复
 // manual_restore: 管理员手动恢复
 const (
-	SchedulerEventFailure        = "failure"
-	SchedulerEventObserveDisable = "observe_disable"
-	SchedulerEventAutoDisable    = "auto_disable"
-	SchedulerEventAutoRecover    = "auto_recover"
-	SchedulerEventManualRestore  = "manual_restore"
+	SchedulerEventFailure       = "failure"
+	SchedulerEventAutoDisable   = "auto_disable"
+	SchedulerEventAutoRecover   = "auto_recover"
+	SchedulerEventManualRestore = "manual_restore"
 )
 
 // ChannelSchedulerLog 独立调度日志。
@@ -119,13 +117,12 @@ func GetChannelSchedulerLogs(params SchedulerLogQueryParams) ([]*ChannelSchedule
 }
 
 type SchedulerLogStat struct {
-	TotalCount          int64                     `json:"total_count"`
-	FailureCount        int64                     `json:"failure_count"`
-	AutoDisableCount    int64                     `json:"auto_disable_count"`
-	ObserveDisableCount int64                     `json:"observe_disable_count"`
-	AutoRecoverCount    int64                     `json:"auto_recover_count"`
-	ManualRestoreCount  int64                     `json:"manual_restore_count"`
-	ChannelStats        []SchedulerLogChannelStat `json:"channel_stats"`
+	TotalCount         int64                     `json:"total_count"`
+	FailureCount       int64                     `json:"failure_count"`
+	AutoDisableCount   int64                     `json:"auto_disable_count"`
+	AutoRecoverCount   int64                     `json:"auto_recover_count"`
+	ManualRestoreCount int64                     `json:"manual_restore_count"`
+	ChannelStats       []SchedulerLogChannelStat `json:"channel_stats"`
 }
 
 type SchedulerLogChannelStat struct {
@@ -164,8 +161,6 @@ func GetChannelSchedulerLogStat(startTimestamp int64, endTimestamp int64) (*Sche
 			stat.FailureCount = ec.Count
 		case SchedulerEventAutoDisable:
 			stat.AutoDisableCount = ec.Count
-		case SchedulerEventObserveDisable:
-			stat.ObserveDisableCount = ec.Count
 		case SchedulerEventAutoRecover:
 			stat.AutoRecoverCount = ec.Count
 		case SchedulerEventManualRestore:
