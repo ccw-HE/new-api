@@ -2779,7 +2779,6 @@
     "No changes": "没有变更",
     "No changes made": "未进行任何更改",
     "No changes to save": "没有需要保存的更改",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "暂无渠道调度日志。开启高级调度器或其观察模式后开始记录。",
     "No channel selected": "未选择渠道",
     "No channel type found.": "未找到渠道类型。",
     "No channels are currently temporarily disabled by the scheduler.": "当前没有被调度器临时禁用的渠道。",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Worker 代理",
     "Worker URL": "Worker URL",
     "Workspaces": "工作区",
-    "Would Disable (Observe)": "达到禁用阈值（观察）",
     "Write independent scheduler logs for failures and disables.": "为失败与禁用事件写入独立调度日志。",
     "Write value to the target field": "把值写入目标字段",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "暂无渠道调度日志。开启高级调度器后将开始记录。"
   }
 }

@@ -2779,7 +2779,6 @@
     "No changes": "No changes",
     "No changes made": "No changes made",
     "No changes to save": "No changes to save",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.",
     "No channel selected": "No channel selected",
     "No channel type found.": "No channel type found.",
     "No channels are currently temporarily disabled by the scheduler.": "No channels are currently temporarily disabled by the scheduler.",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Worker Proxy",
     "Worker URL": "Worker URL",
     "Workspaces": "Workspaces",
-    "Would Disable (Observe)": "Would Disable (Observe)",
     "Write independent scheduler logs for failures and disables.": "Write independent scheduler logs for failures and disables.",
     "Write value to the target field": "Write value to the target field",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "No channel scheduler logs available. Enable the channel scheduler to start recording."
   }
 }

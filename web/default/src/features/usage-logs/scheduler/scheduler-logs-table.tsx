@@ -144,7 +144,7 @@ export function SchedulerLogsTable() {
         isFetching={isFetching}
         emptyTitle={t('No Scheduler Logs Found')}
         emptyDescription={t(
-          'No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.'
+          'No channel scheduler logs available. Enable the channel scheduler to start recording.'
         )}
         skeletonKeyPrefix='scheduler-log-skeleton'
         applyHeaderSize

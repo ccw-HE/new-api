@@ -2779,7 +2779,6 @@
     "No changes": "Нет изменений",
     "No changes made": "Изменения не внесены",
     "No changes to save": "Нет изменений для сохранения",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "Журналов пока нет. Включите планировщик каналов или режим наблюдения, чтобы начать запись.",
     "No channel selected": "Канал не выбран",
     "No channel type found.": "Тип канала не найден.",
     "No channels are currently temporarily disabled by the scheduler.": "Сейчас нет каналов, временно отключённых планировщиком.",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Прокси воркера",
     "Worker URL": "URL воркера",
     "Workspaces": "Рабочие пространства",
-    "Would Disable (Observe)": "Достигнут порог (наблюдение)",
     "Write independent scheduler logs for failures and disables.": "Ведёт отдельные журналы сбоев и отключений.",
     "Write value to the target field": "Записать значение в целевое поле",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "Журналов пока нет. Включите планировщик каналов, чтобы начать запись."
   }
 }

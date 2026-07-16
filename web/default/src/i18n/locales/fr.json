@@ -2779,7 +2779,6 @@
     "No changes": "Aucune modification",
     "No changes made": "Aucune modification effectuée",
     "No changes to save": "Aucune modification à enregistrer",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "Aucun journal disponible. Activez le planificateur de canaux ou son mode observation pour commencer l'enregistrement.",
     "No channel selected": "Aucun canal sélectionné",
     "No channel type found.": "Aucun type de canal trouvé.",
     "No channels are currently temporarily disabled by the scheduler.": "Aucun canal n’est actuellement désactivé temporairement par le planificateur.",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Proxy Worker",
     "Worker URL": "URL du Worker",
     "Workspaces": "Espaces de travail",
-    "Would Disable (Observe)": "Seuil atteint (observation)",
     "Write independent scheduler logs for failures and disables.": "Écrit des journaux indépendants pour les échecs et désactivations.",
     "Write value to the target field": "Écrire la valeur dans le champ cible",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "Aucun journal disponible. Activez le planificateur de canaux pour commencer l’enregistrement."
   }
 }

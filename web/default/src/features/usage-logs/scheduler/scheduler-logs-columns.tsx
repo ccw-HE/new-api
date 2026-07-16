@@ -32,7 +32,6 @@ export const SCHEDULER_EVENT_CONFIG: Record<
   { label: string; variant: NonNullable<StatusBadgeProps['variant']> }
 > = {
   failure: { label: 'Channel Failure', variant: 'danger' },
-  observe_disable: { label: 'Would Disable (Observe)', variant: 'warning' },
   auto_disable: { label: 'Auto Disabled', variant: 'danger' },
   auto_recover: { label: 'Auto Recovered', variant: 'success' },
   manual_restore: { label: 'Manually Restored', variant: 'info' },

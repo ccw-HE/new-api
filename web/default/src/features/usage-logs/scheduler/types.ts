@@ -23,7 +23,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 export type SchedulerEventType =
   | 'failure'
-  | 'observe_disable'
   | 'auto_disable'
   | 'auto_recover'
   | 'manual_restore'
@@ -82,7 +81,6 @@ export interface SchedulerLogStat {
   total_count: number
   failure_count: number
   auto_disable_count: number
-  observe_disable_count: number
   auto_recover_count: number
   manual_restore_count: number
   channel_stats: Array<{

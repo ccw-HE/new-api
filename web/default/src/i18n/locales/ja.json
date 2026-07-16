@@ -2779,7 +2779,6 @@
     "No changes": "変更なし",
     "No changes made": "変更はありません",
     "No changes to save": "保存する変更がありません",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "ログがありません。チャネルスケジューラーまたは観察モードを有効にすると記録が始まります。",
     "No channel selected": "チャネルが選択されていません",
     "No channel type found.": "チャネルタイプが見つかりません。",
     "No channels are currently temporarily disabled by the scheduler.": "現在スケジューラーによって一時無効化されたチャネルはありません。",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Workerプロキシ",
     "Worker URL": "ワーカーURL",
     "Workspaces": "ワークスペース",
-    "Would Disable (Observe)": "無効化閾値到達（観察）",
     "Write independent scheduler logs for failures and disables.": "失敗と無効化について独立したログを書き込みます。",
     "Write value to the target field": "ターゲットフィールドに値を書き込む",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "ログがありません。チャネルスケジューラーを有効にすると記録が始まります。"
   }
 }

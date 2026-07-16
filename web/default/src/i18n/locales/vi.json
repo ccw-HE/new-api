@@ -2779,7 +2779,6 @@
     "No changes": "Không có thay đổi",
     "No changes made": "Không có thay đổi nào được thực hiện",
     "No changes to save": "Không có thay đổi nào để lưu",
-    "No channel scheduler logs available. Enable the channel scheduler or its observation mode to start recording.": "Chưa có nhật ký. Bật bộ lập lịch kênh hoặc chế độ quan sát để bắt đầu ghi.",
     "No channel selected": "Chưa chọn kênh nào",
     "No channel type found.": "Không tìm thấy loại kênh.",
     "No channels are currently temporarily disabled by the scheduler.": "Hiện không có kênh nào bị bộ lập lịch vô hiệu hóa tạm thời.",
@@ -4995,7 +4994,6 @@
     "Worker Proxy": "Proxy Nhân viên",
     "Worker URL": "URL của Worker",
     "Workspaces": "Không gian làm việc",
-    "Would Disable (Observe)": "Đạt ngưỡng vô hiệu hóa (quan sát)",
     "Write independent scheduler logs for failures and disables.": "Ghi nhật ký riêng cho lỗi và vô hiệu hóa.",
     "Write value to the target field": "Ghi giá trị vào trường đích",
     "x": "x",
@@ -5045,6 +5043,7 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "No channel scheduler logs available. Enable the channel scheduler to start recording.": "Chưa có nhật ký. Bật bộ lập lịch kênh để bắt đầu ghi."
   }
 }
