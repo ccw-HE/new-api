@@ -7,23 +7,24 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag to sync (e.g. v1.0.0)'
+        description: "Release Tag to sync (e.g. v1.0.0)"
         required: true
         type: string
 
 # 配置你的 Gitee 仓库信息
 env:
-  GITEE_OWNER: 'QuantumNous'  # 修改为你的 Gitee 用户名
-  GITEE_REPO: 'new-api'                # 修改为你的 Gitee 仓库名
+  GITEE_OWNER: "QuantumNous" # 修改为你的 Gitee 用户名
+  GITEE_REPO: "new-api" # 修改为你的 Gitee 仓库名
 
 jobs:
   sync-to-gitee:
     runs-on: sync
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Get Release Info
         id: release_info
@@ -33,10 +34,10 @@ jobs:
         run: |
           # 获取 release 信息
           RELEASE_INFO=$(gh release view "$TAG_NAME" --json name,body,tagName,targetCommitish)
-          
+
           RELEASE_NAME=$(echo "$RELEASE_INFO" | jq -r '.name')
           TARGET_COMMITISH=$(echo "$RELEASE_INFO" | jq -r '.targetCommitish')
-          
+
           # 使用多行字符串输出
           {
             echo "release_name=$RELEASE_NAME"
@@ -45,16 +46,16 @@ jobs:
             echo "$RELEASE_INFO" | jq -r '.body'
             echo "EOF"
           } >> $GITHUB_OUTPUT
-          
+
           # 下载 release 的所有附件
           gh release download "$TAG_NAME" --dir ./release_assets || echo "No assets to download"
-          
+
           # 列出下载的文件
           ls -la ./release_assets/ || echo "No assets directory"
 
       - name: Create Gitee Release
         id: create_release
-        uses: nICEnnnnnnnLee/action-gitee-release@v2.0.0
+        uses: nICEnnnnnnnLee/action-gitee-release@44b412edade0c837fb0ad7d73f4674ec07c8b722 # v2.0.0
         with:
           gitee_action: create_release
           gitee_owner: ${{ env.GITEE_OWNER }}
@@ -67,7 +68,7 @@ jobs:
 
       - name: Upload Assets to Gitee
         if: hashFiles('release_assets/*') != ''
-        uses: nICEnnnnnnnLee/action-gitee-release@v2.0.0
+        uses: nICEnnnnnnnLee/action-gitee-release@44b412edade0c837fb0ad7d73f4674ec07c8b722 # v2.0.0
         with:
           gitee_action: upload_asset
           gitee_owner: ${{ env.GITEE_OWNER }}
@@ -88,4 +89,3 @@ jobs:
         run: |
           echo "✅ Successfully synced release ${{ github.event.inputs.tag_name }} to Gitee!"
           echo "🔗 Gitee Release URL: https://gitee.com/${{ env.GITEE_OWNER }}/${{ env.GITEE_REPO }}/releases/tag/${{ github.event.inputs.tag_name }}"
-
